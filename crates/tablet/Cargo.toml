@@ -3,11 +3,11 @@ name = "photocraft-tablet"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Pen tablet pressure, tilt, rotation and eraser end on macOS (AppKit) and Linux X11 (XInput2)"
+description = "Pen tablet pressure, tilt, rotation and eraser end on macOS (AppKit), Linux X11 (XInput2) and Android (MotionEvent)"
 
 # The one isolated `unsafe` helper crate (craftrules never-crash, AGENTS.md): the AppKit event
-# monitor needs Objective-C interop. Only `src/macos.rs` allows `unsafe`; everything else is
-# denied, and every other crate keeps the workspace's `unsafe_code = "forbid"`.
+# monitor needs Objective-C interop. Only `src/macos.rs` (and `src/android.rs`, for the
+# `no_mangle` attribute of its JNI hook) allows `unsafe`; everything else is denied, and every other crate keeps the workspace's `unsafe_code = "forbid"`.
 [lints.rust]
 unsafe_code = "deny"
 
