@@ -19,6 +19,11 @@
 //!   winit doesn't (it would have to share winit's connection), so with a pen attached the
 //!   desktop app opens its window through Xwayland, which reports tablet valuators to the X11
 //!   reader. `PHOTOCRAFT_NATIVE_WAYLAND=1` keeps native Wayland, where the pen has no input.
+//! - **Android**: winit forwards a pen's pressure as touch force but drops its tilt and tool
+//!   type, so the app's Activity reads each `MotionEvent` and writes pressure, tilt and the eraser
+//!   end into the [`StylusFeed`] (`photocraft-tablet`'s JNI hook). The app turns off
+//!   [`Stylus::touch_force`]: winit reports fingers' contact size as force too. (Elsewhere, a
+//!   frame with feed samples ignores that frame's touch forces, see [`Stylus::update`].)
 //!
 //! Preferences › Tools › Use Tablet Pressure off makes a pen paint like a mouse. Flipping the pen
 //! to its eraser end selects the Eraser tool and flipping back restores the previous tool, as in
@@ -111,6 +116,10 @@ pub struct Stylus {
     pub feed: StylusFeed,
     /// Preferences › Tools › Use Tablet Pressure: off, a pen paints like a mouse.
     pub use_pressure: bool,
+    /// Read pressure from touch force (`egui::Event::Touch`). Off where the platform feeds the
+    /// pen itself and reports fingers' contact size as force too (Android): fingers then paint
+    /// like a mouse instead of at a near-zero "pressure".
+    pub touch_force: bool,
     /// Preferences › Tools › Pressure Curve (`None`: linear), with the points it was built from.
     pressure_curve: Option<photocraft_engine::prefs::PressureCurve>,
     curve_points: Vec<[f32; 2]>,
@@ -147,6 +156,7 @@ impl Default for Stylus {
         Self {
             feed: StylusFeed::default(),
             use_pressure: true,
+            touch_force: true,
             pressure_curve: None,
             curve_points: Vec::new(),
             end: None,
@@ -184,14 +194,22 @@ impl Stylus {
             self.prev = Some(*last);
         }
         self.frame = self.feed.drain();
+        // A platform that feeds the pen and also reports it as touch force (Android) describes
+        // each contact twice; the feed's samples carry tilt, so bare forces would only dilute
+        // them when the frame's moves are interpolated.
+        let fed = !self.frame.is_empty();
         self.current = None;
         for e in events {
-            if let egui::Event::Touch { phase, force, .. } = e {
+            if let egui::Event::Touch { phase, force, .. } = e
+                && self.touch_force
+            {
                 match phase {
                     egui::TouchPhase::Start | egui::TouchPhase::Move => {
                         if let Some(f) = force.filter(|f| f.is_finite()) {
                             self.touch = Some(f.clamp(0.0, 1.0));
-                            self.frame.push(PenSample { pressure: f.clamp(0.0, 1.0), ..Default::default() });
+                            if !fed {
+                                self.frame.push(PenSample { pressure: f.clamp(0.0, 1.0), ..Default::default() });
+                            }
                         }
                     }
                     egui::TouchPhase::End | egui::TouchPhase::Cancel => self.lifted = true,
@@ -533,6 +551,31 @@ mod tests {
         assert_eq!(s.sample(), Some(PenSample { pressure: 0.6, tilt_x: 90.0, tilt_y: -30.0, rotation: 270.0, eraser: false }));
         s.feed.set(None);
         assert_eq!(s.pressure(), 0.3);
+    }
+
+    #[test]
+    fn fed_samples_supersede_touch_force_in_the_same_frame() {
+        let mut s = Stylus::default();
+        let tilted = PenSample { pressure: 0.5, tilt_x: 30.0, tilt_y: -20.0, rotation: 0.0, eraser: false };
+        s.feed.set(Some(tilted));
+        s.feed.set(Some(PenSample { pressure: 0.7, ..tilted }));
+        s.update(&[touch(egui::TouchPhase::Move, Some(0.5)), touch(egui::TouchPhase::Move, Some(0.7))]);
+        assert_eq!(s.frame.len(), 2, "only the fed samples: {:?}", s.frame);
+        assert!(s.frame.iter().all(|p| p.tilt_x == 30.0), "no untilted touch samples: {:?}", s.frame);
+        // A frame without feed samples still paints from the touch force (Windows pens).
+        s.update(&[touch(egui::TouchPhase::Move, Some(0.4))]);
+        assert_eq!(s.frame, vec![PenSample { pressure: 0.4, ..Default::default() }]);
+    }
+
+    #[test]
+    fn touch_force_can_be_ignored() {
+        let mut s = Stylus { touch_force: false, ..Default::default() };
+        s.update(&[touch(egui::TouchPhase::Start, Some(0.05))]);
+        assert_eq!(s.pressure(), 1.0, "a finger paints like a mouse");
+        assert_eq!(s.sample(), None);
+        s.feed.set(Some(PenSample { pressure: 0.3, ..Default::default() }));
+        s.update(&[touch(egui::TouchPhase::Move, Some(0.3))]);
+        assert_eq!(s.pressure(), 0.3, "the fed pen still has pressure");
     }
 
     #[test]

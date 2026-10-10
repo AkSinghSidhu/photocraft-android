@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- wgpu renders with Vulkan, or OpenGL ES 3 where Vulkan is missing. -->
+    <uses-feature android:glEsVersion="0x00030000" android:required="true" />
+    <uses-feature android:name="android.hardware.vulkan.level" android:required="false" />
+    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+
+    <application
+        android:label="PhotoCraft"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/Theme.PhotoCraft"
+        android:largeHeap="true"
+        android:resizeableActivity="true"
+        android:allowBackup="false">
+
+        <activity
+            android:name=".PhotoCraftActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:windowSoftInputMode="adjustResize">
+
+            <!-- The Rust library GameActivity loads (libphotocraft_android.so). -->
+            <meta-data android:name="android.app.lib_name" android:value="photocraft_android" />
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <!-- "Open with PhotoCraft" and "Share to PhotoCraft" for images and documents. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="content" />
+                <data android:mimeType="application/octet-stream" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="image/*" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

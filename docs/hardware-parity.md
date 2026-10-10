@@ -26,14 +26,14 @@ HDR display to verify.
 
 ## Pen tablets
 
-| Feature | Photoshop | macOS | Windows | Linux X11 | Linux Wayland | Web |
-|---|---|---|---|---|---|---|
-| Pressure | yes | yes (AppKit monitor) | yes (WM_POINTER), jumpy (#2046) | yes (XInput2) | via Xwayland only; GNOME 50 pen doesn't click (#2622), KDE (#2297) | yes |
-| Tilt | yes | yes | **no** | yes | no | yes |
-| Barrel rotation | yes | yes (not applied to tip angle, #1301) | no | partial | no | yes (twist) |
-| Eraser end | yes | yes | no (#2285) | partial | no | partial |
-| WinTab driver mode | yes | – | no | – | – | – |
-| Pressure curve | Windows Ink / driver | global curve in Preferences (#2195) | same | same | same | same |
+| Feature | Photoshop | macOS | Windows | Linux X11 | Linux Wayland | Web | Android |
+|---|---|---|---|---|---|---|---|
+| Pressure | yes | yes (AppKit monitor) | yes (WM_POINTER), jumpy (#2046) | yes (XInput2) | via Xwayland only; GNOME 50 pen doesn't click (#2622), KDE (#2297) | yes | yes (MotionEvent; unverified on hardware) |
+| Tilt | yes | yes | **no** | yes | no | yes | yes (AXIS_TILT + AXIS_ORIENTATION; unverified on hardware) |
+| Barrel rotation | yes | yes (not applied to tip angle, #1301) | no | partial | no | yes (twist) | no (no standard axis) |
+| Eraser end | yes | yes | no (#2285) | partial | no | partial | yes (TOOL_TYPE_ERASER, on contact; no hover) |
+| WinTab driver mode | yes | – | no | – | – | – | – |
+| Pressure curve | Windows Ink / driver | global curve in Preferences (#2195) | same | same | same | same | same |
 
 ## Displays and colour
 
@@ -62,3 +62,4 @@ HDR display to verify.
 | Date | Change | Summary |
 |---|---|---|
 | 2026-10-10 | major | First version |
+| 2026-10-10 | minor | Android column (apps/photocraft-android prototype) |
