@@ -18,6 +18,7 @@
 
 pub mod bridge;
 pub mod ime;
+pub mod keys;
 pub mod services;
 
 #[cfg(target_os = "android")]
