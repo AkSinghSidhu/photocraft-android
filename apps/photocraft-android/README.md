@@ -38,6 +38,10 @@ PhotoCraftActivity.java (extends GameActivity)       libphotocraft_android.so (t
   while a text field has focus and replays the changes as egui text/Backspace/Enter events. The
   keyboard is set to multi-line so its Enter key reaches the app, and it is put away when focus
   leaves the field.
+- **Hardware keyboard shortcuts:** winit 0.30 never reports modifier state on Android, so the
+  shell (`src/keys.rs`) tracks Ctrl, Alt and Shift from their own key presses, in event order
+  (Android often delivers Ctrl down, S down and Ctrl up within one frame), and puts them on
+  every key and pointer event: Ctrl+S, Ctrl+Z, Ctrl+Shift+S, Alt-click and the rest work.
 - **Fingers** paint and click like a mouse (pressure 1): winit reports a finger's contact size as
   touch force, so the app turns off `Stylus::touch_force` and takes pressure from the pen only.
 - **GPU limits:** device limits are clamped to what the adapter reports
@@ -97,6 +101,7 @@ through the image's ARM translation; SwiftShader (software Vulkan).
 | Soft keyboard: typing into the New Document name, Enter confirms, keyboard hides | works |
 | Stylus stroke (`adb shell input stylus swipe`): Java → JNI → `photocraft-tablet` → `StylusFeed` (logcat: `first pen sample`) → brush stroke | works |
 | Finger stroke | works (full width, like a mouse) |
+| Keyboard shortcuts with modifiers (`adb shell input keycombination`): Ctrl+N opens New Document, Ctrl+Z undoes a stroke, Ctrl+Shift+S opens the save picker | works |
 | File › Save As → system picker → PSD written to the picked document (valid `8BPS` header, 1920×1080 RGB/8) | works |
 | File › Open → system picker → that PSD opens in a new tab | works |
 
@@ -114,7 +119,7 @@ OpenRaster import, export settings, preferences, brush presets.
 
 | Area | State on Android |
 |---|---|
-| On-screen keyboard | Typing works (see above), but the keyboard covers the lower half of the screen without resizing the UI, and keyboard shortcuts with modifiers need a hardware keyboard. Typing on a Type layer on the canvas is untested. |
+| On-screen keyboard | Typing works (see above), but the keyboard covers the lower half of the screen without resizing the UI; shortcuts with modifiers need a hardware keyboard. Typing on a Type layer on the canvas is untested. |
 | Touch gestures | Fingers act as a mouse (egui's touch emulation): no pinch-zoom/two-finger pan of the canvas and no palm rejection (a resting palm can click or paint; the pen's pressure/tilt are unaffected by it). Use the zoom/hand tools. |
 | Pen hover | Hover moves are not forwarded by winit 0.30: no brush cursor preview while hovering. The eraser end switches tools on contact, not on proximity, so the first eraser-end touch after flipping still uses the previous tool for that stroke. |
 | Barrel rotation | Android has no standard axis for it: rotation stays 0 (Wacom Art Pen rotation is not read). |
