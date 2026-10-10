@@ -13,6 +13,7 @@ import android.os.Looper;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.MotionEvent;
+import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
 import androidx.core.view.WindowCompat;
@@ -299,7 +300,15 @@ public class PhotoCraftActivity extends GameActivity {
                 answerCancelled(id);
                 return;
             }
-            String name = displayName(uri, pendingName);
+            // The app picks the format from the extension it asked for. Some providers report
+            // a name without it, or no name at all (Downloads on some devices: an id such as
+            // "msf:1234"), and "Untitled-1" can't be saved as anything: keep the requested
+            // name unless the provider's only differs in its base (say "Untitled-1 (1).psd").
+            String provided = displayName(uri, pendingName);
+            String name = extensionOf(provided).equals(extensionOf(pendingName)) ? provided : pendingName;
+            if (!name.equals(provided)) {
+                Log.i(TAG, "save: the provider named the document \"" + provided + "\"; writing \"" + name + "\"");
+            }
             File dest = new File(bridge, "out/" + id + "/" + safeName(name));
             //noinspection ResultOfMethodCallIgnored
             dest.getParentFile().mkdirs();
@@ -318,7 +327,7 @@ public class PhotoCraftActivity extends GameActivity {
         String error = null;
         for (Uri uri : uris) {
             boolean writable = keepAccess(uri, flags);
-            File dest = new File(bridge, "inbox/" + id + "/" + safeName(displayName(uri, "document")));
+            File dest = new File(bridge, "inbox/" + id + "/" + safeName(nameWithExtension(uri)));
             //noinspection ResultOfMethodCallIgnored
             dest.getParentFile().mkdirs();
             try (InputStream in = getContentResolver().openInputStream(uri);
@@ -446,7 +455,7 @@ public class PhotoCraftActivity extends GameActivity {
         // Handled: a recreated Activity mustn't open it again.
         setIntent(new Intent(Intent.ACTION_MAIN));
         final Uri from = uri;
-        final String name = (incomingSeq++) + "-" + safeName(displayName(uri, "document"));
+        final String name = (incomingSeq++) + "-" + safeName(nameWithExtension(uri));
         io.execute(() -> {
             File dir = new File(bridge, "incoming");
             //noinspection ResultOfMethodCallIgnored
@@ -510,6 +519,33 @@ public class PhotoCraftActivity extends GameActivity {
         }
         String last = uri.getLastPathSegment();
         return last != null ? last : fallback;
+    }
+
+    /** A document's name with an extension: saving it again (Ctrl+S) picks the format from it.
+     * Without one in the provider's name, the extension of its MIME type is added. */
+    private String nameWithExtension(Uri uri) {
+        String name = displayName(uri, "document");
+        if (!extensionOf(name).isEmpty()) {
+            return name;
+        }
+        String type = null;
+        try {
+            type = getContentResolver().getType(uri);
+        } catch (Exception e) {
+            Log.w(TAG, "type", e);
+        }
+        String ext = type == null ? null : MimeTypeMap.getSingleton().getExtensionFromMimeType(type);
+        if (ext == null && "image/vnd.adobe.photoshop".equals(type)) {
+            ext = "psd";
+        }
+        Log.i(TAG, "open: \"" + name + "\" has no extension; type " + type + " -> " + ext);
+        return ext == null ? name : name + "." + ext;
+    }
+
+    /** The extension of a file name, lower case; "" for none. */
+    static String extensionOf(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot > 0 && dot < name.length() - 1 ? name.substring(dot + 1).toLowerCase(java.util.Locale.ROOT) : "";
     }
 
     static String safeName(String name) {
