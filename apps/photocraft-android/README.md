@@ -42,6 +42,11 @@ PhotoCraftActivity.java (extends GameActivity)       libphotocraft_android.so (t
   shell (`src/keys.rs`) tracks Ctrl, Alt and Shift from their own key presses, in event order
   (Android often delivers Ctrl down, S down and Ctrl up within one frame), and puts them on
   every key and pointer event: Ctrl+S, Ctrl+Z, Ctrl+Shift+S, Alt-click and the rest work.
+- **Leaving:** File › Exit (Ctrl+Q) asks, as on the desktop, about unsaved work, then has the
+  Activity finish and end the process once saves have been copied back. winit's event loop can't
+  be created twice in one process (a relaunch in the same process closed at once) and
+  GameActivity's `onDestroy` would wait forever for the stopped Rust loop. Back doesn't close the
+  app (it would skip the unsaved-work prompt).
 - **Fingers** paint and click like a mouse (pressure 1): winit reports a finger's contact size as
   touch force, so the app turns off `Stylus::touch_force` and takes pressure from the pen only.
 - **GPU limits:** device limits are clamped to what the adapter reports
@@ -102,6 +107,7 @@ through the image's ARM translation; SwiftShader (software Vulkan).
 | Stylus stroke (`adb shell input stylus swipe`): Java → JNI → `photocraft-tablet` → `StylusFeed` (logcat: `first pen sample`) → brush stroke | works |
 | Finger stroke | works (full width, like a mouse) |
 | Keyboard shortcuts with modifiers (`adb shell input keycombination`): Ctrl+N opens New Document, Ctrl+Z undoes a stroke, Ctrl+Shift+S opens the save picker | works |
+| Ctrl+Q: unsaved-work prompt, then the app closes at once and reopens normally | works |
 | File › Save As → system picker → PSD written to the picked document (valid `8BPS` header, 1920×1080 RGB/8) | works |
 | File › Open → system picker → that PSD opens in a new tab | works |
 
