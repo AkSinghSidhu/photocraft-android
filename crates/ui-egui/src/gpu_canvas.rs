@@ -809,8 +809,16 @@ pub fn use_adapter_limits_with(setup: &mut egui_wgpu::WgpuSetup, on_adapter: imp
 
 /// egui's base limits (WebGL2's on GL) with the adapter's maximum texture and buffer sizes.
 pub fn device_limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    let base = if adapter.get_info().backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
-    let a = adapter.limits();
+    limits_for(adapter.get_info().backend, &adapter.limits())
+}
+
+/// [`device_limits`] for an adapter's backend and limits. A base limit the adapter can't meet
+/// (mobile and software Vulkan drivers report less than wgpu's desktop defaults, for example a
+/// 16 KiB `max_uniform_buffer_binding_size`) is lowered to the adapter's, so requesting the
+/// device can't fail on limits.
+pub fn limits_for(backend: wgpu::Backend, a: &wgpu::Limits) -> wgpu::Limits {
+    let base = if backend == wgpu::Backend::Gl { wgpu::Limits::downlevel_webgl2_defaults() } else { wgpu::Limits::default() };
+    let base = base.or_worse_values_from(a);
     wgpu::Limits { max_texture_dimension_2d: a.max_texture_dimension_2d, max_buffer_size: a.max_buffer_size, ..base }
 }
 
@@ -2151,6 +2159,25 @@ mod mip_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_limits_never_exceed_the_adapter() {
+        // A desktop GPU: egui's defaults, with the adapter's texture and buffer sizes.
+        let desktop = wgpu::Limits { max_texture_dimension_2d: 32768, max_buffer_size: 1 << 34, ..wgpu::Limits::default() };
+        let l = limits_for(wgpu::Backend::Vulkan, &desktop);
+        assert_eq!(l.max_texture_dimension_2d, 32768);
+        assert_eq!(l.max_buffer_size, 1 << 34);
+        assert_eq!(l.max_uniform_buffer_binding_size, wgpu::Limits::default().max_uniform_buffer_binding_size);
+        // A mobile/software Vulkan driver below wgpu's desktop defaults (Android emulator's
+        // SwiftShader: 16 KiB uniform buffers): the request drops to what it offers.
+        let small = wgpu::Limits { max_uniform_buffer_binding_size: 16384, max_texture_dimension_2d: 4096, ..wgpu::Limits::default() };
+        let l = limits_for(wgpu::Backend::Vulkan, &small);
+        assert_eq!(l.max_uniform_buffer_binding_size, 16384);
+        assert!(l.check_limits(&small), "every requested limit is within the adapter's: {l:?}");
+        // GL keeps the WebGL2 base, also clamped.
+        let gl = wgpu::Limits::downlevel_webgl2_defaults();
+        assert!(limits_for(wgpu::Backend::Gl, &gl).check_limits(&gl));
+    }
 
     #[test]
     fn gpu_budget_follows_memory_usage_and_ram() {

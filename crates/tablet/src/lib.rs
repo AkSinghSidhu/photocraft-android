@@ -17,9 +17,13 @@
 //!   pointer for the pen, so pen motion would have to be re-injected into egui as well. Without
 //!   it, compositors give the window no pen input at all, so the desktop app opens its window
 //!   through Xwayland when a pen is attached, and the X11 reader applies.
+//! - **Android** ([`android::install`]): winit forwards pressure as touch force but drops tilt,
+//!   orientation and the eraser end, so the app's Activity reads each `MotionEvent` and passes
+//!   its axes through a JNI `native` method (`android.rs`: no pointer is dereferenced; the only
+//!   `unsafe` is the `no_mangle` attribute JNI's lookup needs).
 //!
-//! The platform glue only reads raw values and hands them to the pure mapping in [`appkit`] and
-//! [`xi`], which normalise, clamp and track pen state and are tested on every platform.
+//! The platform glue only reads raw values and hands them to the pure mapping in [`appkit`],
+//! [`xi`] and [`motion`], which normalise, clamp and track pen state and are tested on every platform.
 //!
 //! A sample is reported through a callback: `Some(sample)` while a pen is in use (hovering or
 //! touching), `None` when the pointer is a mouse again.
@@ -27,7 +31,11 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod appkit;
+pub mod motion;
 pub mod xi;
+
+#[cfg(target_os = "android")]
+pub mod android;
 
 #[cfg(target_os = "macos")]
 pub mod macos;
