@@ -80,14 +80,14 @@ fn run(android: AndroidApp) -> Result<(), String> {
                     app.set_wgpu(rs);
                 }
             }
-            Ok(Box::new(Shell { app, android, ime: String::new(), editing: false }))
+            Ok(Box::new(Shell { app, android, ime: String::new(), editing: false, keys: Default::default() }))
         }),
     )
     .map_err(|e| e.to_string())
 }
 
 /// The app plus what the Android shell adds each frame: on-screen keyboard text (see
-/// [`crate::ime`]).
+/// [`crate::ime`]) and hardware keyboard modifiers ([`crate::keys`]).
 struct Shell {
     app: PhotocraftApp,
     android: AndroidApp,
@@ -95,6 +95,8 @@ struct Shell {
     ime: String,
     /// A text field had focus last frame.
     editing: bool,
+    /// Hardware keyboard modifiers (see [`crate::keys`]).
+    keys: crate::keys::Held,
 }
 
 impl eframe::App for Shell {
@@ -132,6 +134,7 @@ impl eframe::App for Shell {
             // GameActivity's text events don't wake the UI (winit drops them): poll while typing.
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        self.keys.apply(raw_input);
         self.app.raw_input_hook(ctx, raw_input);
     }
 
