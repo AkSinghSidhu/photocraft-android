@@ -135,5 +135,6 @@ OpenRaster import, export settings, preferences, brush presets.
 | Crash-recovery autosave | Not wired; save often. |
 | TCP control server / MCP | Not available. |
 | Photoshop settings import, system fonts | Not available; bundled fonts only (build with `CRAFT_FONTS_DIR` to add more). |
+| Names from document providers | Some providers (Downloads on some devices) report a saved document's name without its extension, or no name. The app keeps the extension it asked for, so the format is right, but the file in that folder may show without `.psd`. |
 | Saving back to read-only documents | A document whose provider grants no write access is saved to the app's private copy only; a message says to use Save As. |
 | Other ABIs | arm64-v8a only (no 32-bit ARM, no x86_64 build target configured). |
