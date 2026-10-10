@@ -18,7 +18,7 @@ const POLL: Duration = Duration::from_millis(100);
 pub fn services(bridge: Arc<Bridge>, files_dir: &Path) -> Services {
     let prefs = files_dir.join("prefs.json");
     let prefs_w = prefs.clone();
-    let (b_dialog, b_save, b_write) = (bridge.clone(), bridge.clone(), bridge);
+    let (b_dialog, b_save, b_write, b_quit) = (bridge.clone(), bridge.clone(), bridge.clone(), bridge);
     Services {
         import: Some(Box::new(|name: &str, bytes: &[u8], max_svg_group_depth: usize| {
             photocraft_io::import_with_svg_group_depth(name, bytes, max_svg_group_depth).map(|r| (r.document, r.warnings)).map_err(|e| e.to_string())
@@ -50,6 +50,14 @@ pub fn services(bridge: Arc<Bridge>, files_dir: &Path) -> Services {
             use std::io::Write as _;
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
             f.write_all(text.as_bytes()).map_err(|e| e.to_string())
+        })),
+        // File › Exit: the Activity finishes and ends the process (see `bridge`), instead of
+        // eframe stopping its event loop, which on Android only happens on the next input event
+        // and leaves a process that can't start the app again.
+        quit: Some(Box::new(move || {
+            if let Err(e) = b_quit.request_quit() {
+                log::error!("couldn't ask the Activity to quit: {e}");
+            }
         })),
         preset_store: Some(photocraft_engine::preset_store::open_dir_async(files_dir.join("presets"))),
         ..Default::default()
@@ -226,6 +234,16 @@ mod tests {
         (s.write.as_mut().unwrap())(&target.to_string_lossy(), b"png bytes").unwrap();
         assert_eq!(std::fs::read(&target).unwrap(), b"png bytes");
         assert_eq!(std::fs::read_dir(bridge.root().join("sync")).unwrap().count(), 1, "queued for the Activity");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn quitting_asks_the_activity() {
+        let dir = std::env::temp_dir().join(format!("photocraft-quit-{}", std::process::id()));
+        let bridge = Arc::new(Bridge::new(&dir).unwrap());
+        let mut s = services(bridge.clone(), &dir);
+        (s.quit.as_mut().unwrap())();
+        assert!(bridge.root().join("quit").is_file());
         std::fs::remove_dir_all(dir).ok();
     }
 

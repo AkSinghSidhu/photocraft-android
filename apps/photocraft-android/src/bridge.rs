@@ -10,6 +10,9 @@
 //! - `sync/*.json`: Rust wrote a file under the bridge (`{"path"}`); the Activity copies it back
 //!   to the document it stands for, which it remembers by path (Save As, and Save of an opened
 //!   document whose provider grants write access).
+//! - `quit`: the app is leaving (File › Exit, once unsaved work is settled). The Activity copies
+//!   back any saves still pending, finishes, and ends the process: winit's event loop can't be
+//!   created twice in one process, so the next launch must start a new one.
 //! - `incoming/`: documents another app sent (View / Share intents), copied in by the Activity
 //!   and opened by the app.
 //!
@@ -62,7 +65,7 @@ impl Bridge {
         for dir in ["inbox", "out", "sync", "incoming"] {
             std::fs::create_dir_all(root.join(dir))?;
         }
-        for stale in ["request.json", "answer.json"] {
+        for stale in ["request.json", "answer.json", "quit"] {
             let _ = std::fs::remove_file(root.join(stale));
         }
         // Ids only need to be unique within a run; start from the clock so a late answer from
@@ -103,6 +106,11 @@ impl Bridge {
         }
         let text = serde_json::to_vec(&serde_json::json!({ "path": path.to_string_lossy() })).map_err(|e| e.to_string())?;
         write_then_rename(&self.root.join("sync").join(format!("{}.json", self.next_id())), &text)
+    }
+
+    /// Ask the Activity to finish (see the module docs).
+    pub fn request_quit(&self) -> Result<(), String> {
+        write_then_rename(&self.root.join("quit"), b"")
     }
 
     /// Documents other apps sent since the last call, as (name, bytes); each is removed once read.
@@ -213,6 +221,17 @@ mod tests {
         std::fs::write(b.root().join("answer.json"), "{}").unwrap();
         let b = Bridge::new(&dir).unwrap();
         assert!(!b.root().join("request.json").exists() && !b.root().join("answer.json").exists());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn quitting_leaves_a_flag_a_new_run_clears() {
+        let dir = temp();
+        let b = Bridge::new(&dir).unwrap();
+        b.request_quit().unwrap();
+        assert!(b.root().join("quit").is_file());
+        let b = Bridge::new(&dir).unwrap();
+        assert!(!b.root().join("quit").exists(), "a new run doesn't quit at once");
         std::fs::remove_dir_all(dir).ok();
     }
 
