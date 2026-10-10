@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 /**
  * PhotoCraft's Activity: GameActivity runs the Rust app (libphotocraft_android.so); this class
@@ -79,6 +80,7 @@ public class PhotoCraftActivity extends GameActivity {
             try {
                 checkRequest();
                 checkSync();
+                checkQuit();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
             }
@@ -110,6 +112,40 @@ public class PhotoCraftActivity extends GameActivity {
     protected void onPause() {
         handler.removeCallbacks(poll);
         super.onPause();
+    }
+
+    /**
+     * Back sends PhotoCraft to the background rather than finishing it: finishing would leave
+     * without the unsaved-work prompt (File › Exit has it).
+     */
+    @Override
+    public void onBackPressed() {
+        moveTaskToBack(true);
+    }
+
+    /**
+     * Once the Activity is finished, end the process, after saves still being copied back to
+     * their documents. Two reasons: winit's event loop can't be created twice in one process, so
+     * a later launch in this process would fail; and GameActivity's onDestroy waits for the Rust
+     * thread to acknowledge the destroy, which winit's Android backend doesn't do once eframe's
+     * loop has stopped, so calling it hangs the main thread (and every later launch with it).
+     */
+    @Override
+    protected void onDestroy() {
+        if (isFinishing()) {
+            checkSync();
+            io.shutdown();
+            try {
+                if (!io.awaitTermination(20, TimeUnit.SECONDS)) {
+                    Log.w(TAG, "saves still copying after 20 s; ending anyway");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            Log.i(TAG, "finished; ending the process");
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }
+        super.onDestroy();
     }
 
     @Override
@@ -323,6 +359,20 @@ public class PhotoCraftActivity extends GameActivity {
             // Not persistable: the grant lasts while the app runs, which is enough to save back.
         }
         return write;
+    }
+
+    // ---- Leaving ---------------------------------------------------------------------------
+
+    /** File › Exit (bridge `quit`): finish once pending saves are queued (see onDestroy). */
+    private void checkQuit() {
+        File f = new File(bridge, "quit");
+        if (!f.exists()) {
+            return;
+        }
+        //noinspection ResultOfMethodCallIgnored
+        f.delete();
+        checkSync();
+        finish();
     }
 
     // ---- Writing back ----------------------------------------------------------------------
