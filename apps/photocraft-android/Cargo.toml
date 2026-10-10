@@ -1,0 +1,46 @@
+[package]
+name = "photocraft-android"
+description = "PhotoCraft on Android tablets (eframe on GameActivity, wgpu Vulkan with a GLES fallback)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+name = "photocraft_android"
+# cdylib: the `libphotocraft_android.so` GameActivity loads; rlib: host unit tests.
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# Open HEIC/HEIF photos (the optional photocraft-heif crate), as in the other apps.
+heif = ["photocraft-codecs/heif"]
+
+# The workspace forbids `unsafe`. android-activity finds the app's entry point by symbol name,
+# so `android_main` needs `#[unsafe(no_mangle)]`: like `photocraft-tablet`, this crate denies
+# `unsafe` and allows it on that one function only (`src/app.rs`).
+[lints.rust]
+unsafe_code = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+
+[dependencies]
+photocraft-engine = { workspace = true }
+photocraft-io = { workspace = true }
+photocraft-codecs = { workspace = true }
+photocraft-doc = { workspace = true }
+photocraft-format = { workspace = true }
+photocraft-ui-egui = { workspace = true }
+photocraft-tablet = { workspace = true }
+egui = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+eframe = { workspace = true, features = ["default_fonts", "wgpu", "android-game-activity"] }
+android_logger = { version = "0.15", default-features = false }
+# The `AndroidApp` type `android_main` receives (eframe's `NativeOptions::android_app`); eframe
+# doesn't re-export winit. Already in Cargo.lock (eframe); pinned exactly to the same version, as in apps/photocraft.
+winit = { version = "=0.30.13", default-features = false, features = ["android-game-activity"] }
