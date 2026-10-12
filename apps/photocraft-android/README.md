@@ -69,7 +69,7 @@ with platform 35, build-tools 35 and NDK r27 or newer.
 export ANDROID_HOME=/path/to/android-sdk
 export ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.3.13750724
 apps/photocraft-android/build.sh
-adb install -r target/android/photocraft-0.6.0-arm64-v8a.apk
+adb install -r target/android/photocraft-<version>-arm64-v8a.apk
 ```
 
 `build.sh` builds the library with `cargo ndk` (copying it into `android/app/src/main/jniLibs`),
@@ -136,5 +136,6 @@ OpenRaster import, export settings, preferences, brush presets.
 | TCP control server / MCP | Not available. |
 | Photoshop settings import, system fonts | Not available; bundled fonts only (build with `CRAFT_FONTS_DIR` to add more). |
 | Names from document providers | Some providers (Downloads on some devices) report a saved document's name without its extension, or no name. The app keeps the extension it asked for, so the format is right, but the file in that folder may show without `.psd`. |
+| Choosing a folder | Commands that ask for a folder (such as loading video frames as layers) report that it isn't supported on Android; pick the files themselves. |
 | Saving back to read-only documents | A document whose provider grants no write access is saved to the app's private copy only; a message says to use Save As. |
 | Other ABIs | arm64-v8a only (no 32-bit ARM, no x86_64 build target configured). |
