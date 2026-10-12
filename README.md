@@ -1,3 +1,34 @@
+# PhotoCraft for Android (unofficial port)
+
+> [!IMPORTANT]
+> This is an **unofficial, community fork** of [PhotoCraft](https://github.com/storytold/photocraft)
+> that runs it on **Android tablets**. It is not made, endorsed or supported by the PhotoCraft
+> developers or ArtCraft. For the official desktop and web app, go to
+> [storytold/photocraft](https://github.com/storytold/photocraft).
+
+**[⬇ Download the APK](https://github.com/morte2437/photocraft-android/releases/latest)**: a
+prototype for arm64 Android tablets (Android 8.0 or newer), signed with a debug key for
+sideloading.
+
+![PhotoCraft on an Android tablet with the Shortcut Pad on the right edge](docs/images/android-shortcut-pad.png)
+
+What the port adds:
+
+- The full PhotoCraft engine and interface on Android (wgpu on Vulkan, OpenGL ES fallback).
+- **Pen input:** pressure, tilt and the eraser end of Wacom EMR, S Pen and USI styluses.
+- **Files** through Android's document picker (Open, Save, Save As, Open with, Share).
+- **Keyboards:** hardware shortcuts with Ctrl/Alt/Shift, and typing on the on-screen keyboard.
+- **Shortcut Pad:** 2 to 10 touch keys and a wheel on the screen edge, like a pen tablet's
+  ExpressKeys, for working without a keyboard (Window › Shortcut Pad).
+
+Details, build steps and what isn't supported yet:
+[apps/photocraft-android/README.md](apps/photocraft-android/README.md). The Android work lives on
+the `android-port` branch; `main` mirrors the original project.
+
+---
+
+*The original PhotoCraft README follows.*
+
 <p align="center">
   <a href="https://getartcraft.com/">
     <picture>
