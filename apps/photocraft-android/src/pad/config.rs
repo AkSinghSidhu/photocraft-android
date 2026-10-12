@@ -1,12 +1,15 @@
-//! The Shortcut Pad's settings: which side it sits on, what its four keys press and which
+//! The Shortcut Pad's settings: which side it sits on, what its keys (2 to 10) press and which
 //! functions the wheel's centre button cycles through. Saved as JSON in the app's files
 //! directory; a missing or unreadable file gives the defaults.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// How many keys the pad has (two above the wheel, two below).
-pub const KEYS: usize = 4;
+/// The fewest and most keys the pad can have (split around the wheel, the extra one of an odd
+/// count above it). Ten still fit a tablet's height at a comfortable size (see
+/// `router::Layout`).
+pub const MIN_KEYS: usize = 2;
+pub const MAX_KEYS: usize = 10;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -90,14 +93,12 @@ impl Default for PadConfig {
 }
 
 impl PadConfig {
-    /// Exactly [`KEYS`] keys, at least one wheel function, no function twice.
+    /// Between [`MIN_KEYS`] and [`MAX_KEYS`] keys, at least one wheel function, no function
+    /// twice.
     pub fn sanitized(mut self) -> Self {
         let defaults = Self::default();
-        self.keys.truncate(KEYS);
-        while self.keys.len() < KEYS {
-            let i = self.keys.len();
-            self.keys.push(defaults.keys.get(i).cloned().unwrap_or_else(|| KeySlot::new("", "")));
-        }
+        let n = self.keys.len().clamp(MIN_KEYS, MAX_KEYS);
+        self.set_key_count(n);
         let mut seen = Vec::new();
         self.wheel_modes.retain(|m| {
             let new = !seen.contains(m);
@@ -108,6 +109,20 @@ impl PadConfig {
             self.wheel_modes = defaults.wheel_modes;
         }
         self
+    }
+
+    /// Grow or shrink to `n` keys (clamped to the allowed range). Removed keys go from the
+    /// bottom; added ones take the presets no key uses yet, in order.
+    pub fn set_key_count(&mut self, n: usize) {
+        let n = n.clamp(MIN_KEYS, MAX_KEYS);
+        self.keys.truncate(n);
+        while self.keys.len() < n {
+            let next = PRESETS
+                .iter()
+                .find(|(_, _, shortcut)| !self.keys.iter().any(|k| k.shortcut.eq_ignore_ascii_case(shortcut)))
+                .map_or_else(|| KeySlot::new("", ""), |(_, label, shortcut)| KeySlot::new(label, shortcut));
+            self.keys.push(next);
+        }
     }
 
     pub fn load(path: &Path) -> Self {
@@ -121,24 +136,25 @@ impl PadConfig {
     }
 }
 
-/// Shortcuts the settings offer (label, shortcut); any other can be typed.
-pub const PRESETS: &[(&str, &str)] = &[
-    ("Undo", "Ctrl+Z"),
-    ("Redo", "Ctrl+Shift+Z"),
-    ("Alt", "Alt"),
-    ("Shift", "Shift"),
-    ("Ctrl", "Ctrl"),
-    ("Pan", "Space"),
-    ("Brush", "B"),
-    ("Eraser", "E"),
-    ("Eyedropper", "I"),
-    ("Swap Colors", "X"),
-    ("Deselect", "Ctrl+D"),
-    ("Transform", "Ctrl+T"),
-    ("Fit", "Ctrl+0"),
-    ("100%", "Ctrl+1"),
-    ("Save", "Ctrl+S"),
-    ("Panels", "Tab"),
+/// Shortcuts the settings offer: (name in the menu, label on the key, shortcut). Key labels
+/// stay within 8 characters so they fit the key; any other shortcut can be typed.
+pub const PRESETS: &[(&str, &str, &str)] = &[
+    ("Undo", "Undo", "Ctrl+Z"),
+    ("Redo", "Redo", "Ctrl+Shift+Z"),
+    ("Alt (hold)", "Alt", "Alt"),
+    ("Shift (hold)", "Shift", "Shift"),
+    ("Ctrl (hold)", "Ctrl", "Ctrl"),
+    ("Pan (hold Space)", "Pan", "Space"),
+    ("Brush", "Brush", "B"),
+    ("Eraser", "Eraser", "E"),
+    ("Eyedropper", "Picker", "I"),
+    ("Swap Colors", "Swap", "X"),
+    ("Deselect", "Deselect", "Ctrl+D"),
+    ("Free Transform", "Transfrm", "Ctrl+T"),
+    ("Fit on Screen", "Fit", "Ctrl+0"),
+    ("100%", "100%", "Ctrl+1"),
+    ("Save", "Save", "Ctrl+S"),
+    ("Show/Hide Panels", "Panels", "Tab"),
 ];
 
 /// A parsed shortcut: modifiers and an optional key (none: the modifiers alone, held).
@@ -208,12 +224,32 @@ mod tests {
 
     #[test]
     fn every_preset_parses() {
-        for (label, s) in PRESETS {
-            assert!(parse(s).is_ok_and(|c| !c.is_empty()), "{label}: {s}");
+        for (name, label, s) in PRESETS {
+            assert!(parse(s).is_ok_and(|c| !c.is_empty()), "{name}: {s}");
+            assert!(label.chars().count() <= 8, "{name}: key label {label:?} is too long for a key");
         }
         for k in PadConfig::default().keys {
             assert!(parse(&k.shortcut).is_ok(), "{k:?}");
         }
+    }
+
+    #[test]
+    fn the_key_count_grows_with_unused_presets_and_shrinks_from_the_bottom() {
+        let mut c = PadConfig::default();
+        c.set_key_count(7);
+        let shortcuts: Vec<&str> = c.keys.iter().map(|k| k.shortcut.as_str()).collect();
+        // The defaults (Undo, Redo, Alt, Space), then the first presets they don't use.
+        assert_eq!(shortcuts, ["Ctrl+Z", "Ctrl+Shift+Z", "Alt", "Space", "Shift", "Ctrl", "B"]);
+        c.set_key_count(MAX_KEYS + 5);
+        assert_eq!(c.keys.len(), MAX_KEYS, "clamped");
+        let mut seen: Vec<&str> = c.keys.iter().map(|k| k.shortcut.as_str()).collect();
+        seen.sort_unstable();
+        seen.dedup();
+        assert_eq!(seen.len(), MAX_KEYS, "no shortcut twice");
+        c.set_key_count(3);
+        assert_eq!(c.keys.iter().map(|k| k.label.as_str()).collect::<Vec<_>>(), ["Undo", "Redo", "Alt"]);
+        c.set_key_count(0);
+        assert_eq!(c.keys.len(), MIN_KEYS);
     }
 
     #[test]
@@ -233,7 +269,12 @@ mod tests {
         // wheel list fixed.
         std::fs::write(&path, br#"{"side":"left","keys":[{"label":"A","shortcut":"A"}],"wheelModes":[]}"#).unwrap();
         let c = PadConfig::load(&path);
-        assert_eq!((c.side, c.keys.len(), c.keys[0].label.as_str(), c.enabled), (Side::Left, KEYS, "A", true));
+        assert_eq!((c.side, c.keys.len(), c.keys[0].label.as_str(), c.enabled), (Side::Left, MIN_KEYS, "A", true));
+        // A saved count within the range is kept, an out-of-range one clamped.
+        let ten = PadConfig { keys: (0..15).map(|i| KeySlot::new(&i.to_string(), "")).collect(), ..Default::default() }.sanitized();
+        assert_eq!(ten.keys.len(), MAX_KEYS);
+        let six = PadConfig { keys: (0..6).map(|i| KeySlot::new(&i.to_string(), "")).collect(), ..Default::default() }.sanitized();
+        assert_eq!(six.keys.len(), 6);
         assert_eq!(c.wheel_modes, PadConfig::default().wheel_modes);
         let c = PadConfig { wheel_modes: vec![WheelMode::Zoom, WheelMode::Zoom, WheelMode::Rotate], ..Default::default() }.sanitized();
         assert_eq!(c.wheel_modes, [WheelMode::Zoom, WheelMode::Rotate]);
