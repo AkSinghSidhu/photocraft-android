@@ -3,8 +3,10 @@
 //!
 //! - A key presses its shortcut while it is touched: `Ctrl+Z` undoes, a modifier on its own
 //!   (`Alt`) is held, so the pen Alt-clicks while a finger rests on the key.
-//! - Sliding a finger around the wheel zooms, rotates the view, sizes or hardens the brush, or
-//!   steps through history; tapping its centre switches to the next of the chosen functions.
+//! - Pressing the wheel opens a large ring (its size is a setting); sliding the finger around it
+//!   zooms, rotates the view, sizes or hardens the brush (all smoothly), or steps through
+//!   history, at the chosen sensitivity. Tapping the centre switches to the next of the chosen
+//!   functions.
 //! - Window › Shortcut Pad shows or hides it, moves it to either side and opens its settings
 //!   (how many keys, each key's shortcut, the wheel's functions), which are saved in the app's
 //!   files directory.
@@ -16,7 +18,7 @@ pub mod config;
 pub mod router;
 pub mod wheel;
 
-use config::{Chord, MAX_KEYS, MIN_KEYS, PadConfig, Side, WheelMode};
+use config::{Chord, MAX_KEYS, MIN_KEYS, PadConfig, SENSITIVITY_RANGE, Side, WHEEL_SIZE_RANGE, WheelMode};
 use egui::{Align2, Event, FontId, Key, Modifiers, Stroke};
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::menus::MenuItem;
@@ -63,9 +65,44 @@ pub struct Pad {
     /// Keys being held, with the chord they pressed (released with the same one even if the
     /// settings change meanwhile).
     held: HashMap<usize, Chord>,
-    /// Wheel commands waiting for the frame (they need the app and the egui context).
-    pending: Vec<(&'static str, Value)>,
+    /// Wheel changes waiting for the frame (they need the app and the egui context).
+    pending: Vec<wheel::Action>,
+    /// The large ring shown while the wheel is pressed.
+    big: Option<BigRing>,
+    /// Where the finger turning the wheel is.
+    finger: Option<egui::Pos2>,
+    /// What the wheel press started on, and where; whether the finger has slid since (a tap on
+    /// the centre switches function, a slide turns).
+    press: Option<(Control, egui::Pos2)>,
+    slid: bool,
+    /// The window's content area last frame (keeps the large ring on screen).
+    screen: egui::Rect,
+    /// Brush size and hardness as the turn has set them, unrounded, so slow turns add up.
+    size_target: Option<f32>,
+    hardness_target: Option<f32>,
 }
+
+/// The large ring: where it is and how big.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BigRing {
+    center: egui::Pos2,
+    radius: f32,
+}
+
+/// The large ring for a press on the wheel at `wheel`: as near the wheel as it fits on screen
+/// (it slides in from the pad's edge onto the canvas).
+fn big_ring(wheel: egui::Pos2, radius: f32, screen: egui::Rect, side: Side) -> BigRing {
+    let m = radius + 8.0;
+    let x = match side {
+        Side::Right => wheel.x.min(screen.right() - m),
+        Side::Left => wheel.x.max(screen.left() + m),
+    };
+    let y = if screen.height() > 2.0 * m { wheel.y.clamp(screen.top() + m, screen.bottom() - m) } else { screen.center().y };
+    BigRing { center: egui::pos2(x, y), radius }
+}
+
+/// Brush sizes the engine accepts (`photocraft_paint::MAX_BRUSH_SIZE`).
+const MAX_BRUSH_SIZE: f32 = 5000.0;
 
 impl Pad {
     pub fn new(files_dir: &std::path::Path) -> Self {
@@ -80,6 +117,13 @@ impl Pad {
             turning: false,
             held: HashMap::new(),
             pending: Vec::new(),
+            big: None,
+            finger: None,
+            press: None,
+            slid: false,
+            screen: egui::Rect::NOTHING,
+            size_target: None,
+            hardness_target: None,
         }
     }
 
@@ -177,20 +221,39 @@ impl Pad {
                     out.extend(release(chord));
                 }
             }
-            PadTouch::Down(Control::Ring, p) | PadTouch::Move(Control::Ring, p) => {
-                if let Some(center) = self.layout.as_ref().map(|l| l.center) {
-                    if matches!(t, PadTouch::Down(..)) {
-                        self.turn = wheel::Turn::default();
-                        self.turning = true;
-                    }
-                    let mode = self.mode();
-                    self.pending.extend(self.turn.moved(mode, wheel::angle(center, p)));
+            // The whole wheel, centre included, opens the large ring; a tap on the centre that
+            // doesn't slide switches function when lifted.
+            PadTouch::Down(Control::Ring | Control::Center, p) | PadTouch::Move(Control::Ring | Control::Center, p) => {
+                let Some((center, small_r)) = self.layout.as_ref().map(|l| (l.center, l.ring_outer)) else { return };
+                if let PadTouch::Down(control, _) = t {
+                    self.press = Some((control, p));
+                    self.slid = false;
+                    self.turn = wheel::Turn::default();
+                    self.turning = true;
+                    self.size_target = None;
+                    self.hardness_target = None;
+                    let c = &self.shared.borrow().config;
+                    self.big = c.enlarge.then(|| big_ring(center, c.wheel_size / 2.0, self.screen, c.side));
                 }
+                self.finger = Some(p);
+                if self.press.is_some_and(|(_, start)| start.distance(p) > 12.0) {
+                    self.slid = true;
+                }
+                let (c, r) = self.big.map_or((center, small_r), |b| (b.center, b.radius));
+                // Too near the centre for a steady angle: wait for the finger to come out.
+                let angle = (p.distance(c) >= r * 0.2).then(|| wheel::angle(c, p));
+                let (mode, sensitivity) = (self.mode(), self.shared.borrow().config.sensitivity);
+                self.pending.extend(self.turn.moved(mode, angle, sensitivity));
             }
-            PadTouch::Up(Control::Ring) => self.turning = false,
-            PadTouch::Up(Control::Center) => {
-                let n = self.shared.borrow().config.wheel_modes.len().max(1);
-                self.mode = (self.mode + 1) % n;
+            PadTouch::Up(Control::Ring | Control::Center) => {
+                if matches!(self.press, Some((Control::Center, _))) && !self.slid {
+                    let n = self.shared.borrow().config.wheel_modes.len().max(1);
+                    self.mode = (self.mode + 1) % n;
+                }
+                self.press = None;
+                self.turning = false;
+                self.big = None;
+                self.finger = None;
             }
             _ => {}
         }
@@ -201,21 +264,100 @@ impl Pad {
             out.extend(release(chord));
         }
         self.turning = false;
+        self.big = None;
+        self.finger = None;
     }
 
-    /// Run the wheel's commands (from `logic`, before the app's).
+    /// Apply the wheel's changes (from `logic`, before the app's). A frame's movements are
+    /// merged: one zoom, one rotation, one brush change, however many touch events came in.
     pub fn run_pending(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
-        for (id, params) in std::mem::take(&mut self.pending) {
+        let actions = std::mem::take(&mut self.pending);
+        if actions.is_empty() {
+            return;
+        }
+        let (mut zoom, mut rotate, mut size, mut hardness) = (1.0f32, 0.0f32, 1.0f32, 0.0f32);
+        let run = |app: &mut PhotocraftApp, id: &str, params: Value| {
             if let Err(e) = photocraft_ui_egui::menus::invoke(app, ctx, id, params) {
-                // Nothing to zoom without a document, no redo at the newest state…: not errors
-                // worth showing for a wheel turn.
+                // No document to zoom, nothing to redo…: not worth an error for a wheel turn.
                 log::debug!("Shortcut Pad wheel: {id}: {e}");
             }
+        };
+        for a in actions {
+            match a {
+                wheel::Action::Zoom(f) => zoom *= f,
+                wheel::Action::Rotate(d) => rotate += d,
+                wheel::Action::BrushSize(f) => size *= f,
+                wheel::Action::Hardness(d) => hardness += d,
+                wheel::Action::Command(id) => run(app, id, serde_json::json!({})),
+            }
+        }
+        if zoom != 1.0 {
+            app.sync_views();
+            if let Some(v) = app.session.active_index().and_then(|i| app.ui.views.get_mut(i)) {
+                v.fit_pending = false;
+                v.fill_pending = false;
+                v.zoom = (v.zoom * zoom).clamp(0.01, 32.0);
+            }
+        }
+        if rotate != 0.0 {
+            run(app, "view.rotateView", serde_json::json!({ "delta": rotate }));
+        }
+        if size != 1.0 {
+            let target = (self.size_target.unwrap_or(app.session.tools.brush.size) * size).clamp(1.0, MAX_BRUSH_SIZE);
+            self.size_target = Some(target);
+            if target.round() != app.session.tools.brush.size {
+                run(app, "tools.setBrush", serde_json::json!({ "brush": { "size": target.round() } }));
+            }
+        }
+        if hardness != 0.0 {
+            let target = (self.hardness_target.unwrap_or(app.session.tools.brush.hardness) + hardness).clamp(0.0, 1.0);
+            self.hardness_target = Some(target);
+            let rounded = (target * 100.0).round() / 100.0;
+            if rounded != app.session.tools.brush.hardness {
+                run(app, "tools.setBrush", serde_json::json!({ "brush": { "hardness": rounded } }));
+            }
+        }
+        ctx.request_repaint();
+    }
+
+    /// What the large ring shows for the current function.
+    fn readout(app: &PhotocraftApp, mode: WheelMode) -> String {
+        let view = app.session.active_index().and_then(|i| app.ui.views.get(i));
+        let brush = &app.session.tools.brush;
+        match mode {
+            WheelMode::Zoom => view.map(|v| format!("{:.0}%", v.zoom * 100.0)).unwrap_or_default(),
+            WheelMode::Rotate => view.map(|v| format!("{:.0}°", v.rotation)).unwrap_or_default(),
+            WheelMode::BrushSize => format!("{:.0} px", brush.size),
+            WheelMode::BrushHardness => format!("{:.0}%", brush.hardness * 100.0),
+            WheelMode::History => "Undo ◀ ▶ Redo".into(),
         }
     }
 
+    fn paint_big(&self, p: &egui::Painter, b: BigRing, mode: WheelMode, readout: &str, tk: &Tokens) {
+        let (c, r) = (b.center, b.radius);
+        let band = r * 0.32;
+        let mid = r - band / 2.0;
+        p.circle_filled(c, r + 2.0, tk.shadow);
+        p.circle_filled(c, r, tk.card);
+        p.circle_stroke(c, mid, Stroke::new(band, tk.field));
+        p.circle_stroke(c, r, Stroke::new(2.0, tk.accent));
+        for k in 0..24 {
+            let a = (k as f32 * wheel::TICK).to_radians();
+            p.circle_filled(c + egui::vec2(a.cos(), a.sin()) * mid, 1.6, tk.text_faint);
+        }
+        if let Some(f) = self.finger
+            && f.distance(c) > 1.0
+        {
+            let dir = (f - c).normalized();
+            p.circle_filled(c + dir * mid, band * 0.38, tk.accent);
+        }
+        p.text(c - egui::vec2(0.0, 10.0), Align2::CENTER_CENTER, mode.short(), FontId::proportional(15.0), tk.text_dim);
+        p.text(c + egui::vec2(0.0, 12.0), Align2::CENTER_CENTER, readout, FontId::proportional(18.0), tk.text);
+    }
+
     /// Draw the pad (before the app, which then lays out in the rest of the window).
-    pub fn show(&mut self, ui: &mut egui::Ui, tk: &Tokens) {
+    pub fn show(&mut self, ui: &mut egui::Ui, tk: &Tokens, app: &PhotocraftApp) {
+        self.screen = ui.ctx().content_rect();
         let config = self.shared.borrow().config.clone();
         if !config.enabled {
             self.layout = None;
@@ -238,6 +380,10 @@ impl Pad {
             })
             .inner;
         self.layout = Some(layout);
+        if let Some(b) = self.big {
+            let painter = ui.ctx().layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("shortcut_pad_ring")));
+            self.paint_big(&painter, b, mode, &Self::readout(app, mode), tk);
+        }
     }
 
     fn paint(&self, p: &egui::Painter, l: &Layout, config: &PadConfig, mode: WheelMode, tk: &Tokens) {
@@ -358,6 +504,10 @@ impl Pad {
                         }
                     }
                 }
+                ui.checkbox(&mut c.enlarge, "Open a large ring when the wheel is pressed");
+                ui.add_enabled(c.enlarge, egui::Slider::new(&mut c.wheel_size, WHEEL_SIZE_RANGE).text("Ring size").suffix(" pt").integer());
+                ui.add(egui::Slider::new(&mut c.sensitivity, SENSITIVITY_RANGE).logarithmic(true).text("Sensitivity").suffix("×"))
+                    .on_hover_text("At 1×, a quarter turn doubles the zoom, a third of a turn doubles the brush size");
                 ui.separator();
                 if ui.button("Restore Defaults").clicked() {
                     c = PadConfig::default();
@@ -464,19 +614,23 @@ mod tests {
     }
 
     #[test]
-    fn the_wheel_queues_commands_and_the_centre_switches_function() {
+    fn the_wheel_queues_changes_and_the_centre_switches_function() {
         let (mut p, dir) = pad();
+        p.screen = Rect::from_min_size(pos2(0.0, 0.0), vec2(1072.0, 800.0));
         let l = p.layout.clone().unwrap();
         let at = |deg: f32| l.center + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * (l.ring_outer - 4.0);
-        run(&mut p, vec![touch(1, TouchPhase::Start, at(0.0)), touch(1, TouchPhase::Move, at(35.0)), touch(1, TouchPhase::Move, at(70.0))]);
-        assert_eq!(p.pending.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["view.zoomIn", "view.zoomIn"], "default first function: zoom");
-        run(&mut p, vec![touch(1, TouchPhase::End, at(70.0))]);
+        run(&mut p, vec![touch(1, TouchPhase::Start, at(90.0))]);
+        let big = p.big.expect("pressing the wheel opens the large ring");
+        assert!(big.center.x + big.radius <= p.screen.right(), "on screen: {big:?}");
+        let on_big = |deg: f32| big.center + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * big.radius * 0.8;
+        run(&mut p, vec![touch(1, TouchPhase::Move, on_big(0.0)), touch(1, TouchPhase::Move, on_big(45.0))]);
+        assert!(p.pending.iter().any(|a| matches!(a, wheel::Action::Zoom(f) if *f > 1.0)), "clockwise zooms in: {:?}", p.pending);
+        run(&mut p, vec![touch(1, TouchPhase::End, on_big(45.0))]);
+        assert!(p.big.is_none(), "lifting closes it");
         p.pending.clear();
         // Tap the centre: Rotate View.
         run(&mut p, vec![touch(2, TouchPhase::Start, l.center), touch(2, TouchPhase::End, l.center)]);
         assert_eq!(p.mode(), WheelMode::Rotate);
-        run(&mut p, vec![touch(3, TouchPhase::Start, at(0.0)), touch(3, TouchPhase::Move, at(10.0))]);
-        assert_eq!(p.pending.first().map(|(id, _)| *id), Some("view.rotateView"));
         std::fs::remove_dir_all(dir).ok();
     }
 
