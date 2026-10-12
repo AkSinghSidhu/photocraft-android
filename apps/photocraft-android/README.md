@@ -59,6 +59,34 @@ PhotoCraftActivity.java (extends GameActivity)       libphotocraft_android.so (t
 `android_main` (android-activity looks it up by name, `src/app.rs`) and on the JNI pen hook
 (`crates/tablet/src/android.rs`). Neither dereferences a pointer.
 
+## Shortcut Pad
+
+A slim strip on the left or right edge of the window with four keys and a wheel, modelled on a
+pen tablet's ExpressKeys and Touch Ring, for working without a keyboard.
+
+- **Keys** press a shortcut while touched. `Ctrl+Z`, `B` or `Tab` act once; a modifier on its
+  own (`Alt`, `Shift`, `Ctrl`) or `Space` is held for as long as the finger stays on the key, so
+  the pen can Alt-click (Eyedropper, Clone Stamp source) or pan while a key is held.
+  Defaults: Undo, Redo, Alt, Pan (Space).
+- **The wheel**: slide a finger around the ring. Clockwise zooms in (one level per 30°), rotates
+  the view (follows the finger), grows the brush (10°), hardens it (15°) or redoes (30°);
+  counter-clockwise does the opposite. Tap the centre to switch function; the lights on the ring
+  show which one of the chosen functions is active, the centre names it.
+- **Window › Shortcut Pad**: Show Shortcut Pad, On the Left / On the Right, and Shortcut Pad
+  Settings… (each key's label and shortcut, from presets or typed; which functions the wheel's
+  centre cycles through; Restore Defaults). Settings are saved in the app's files directory
+  (`shortcut-pad.json`).
+
+How it works (`src/pad/`): the pad is an egui side panel drawn before the app, so the app lays
+out beside it. egui turns only the first touch into the pointer, so a finger on a key would
+have kept the pen from drawing; while the pad is shown, `router.rs` takes over touch-to-pointer
+emulation: touches that start on the pad go to the pad (never to the canvas), the first touch
+elsewhere drives the pointer, and a window or menu drawn over the pad keeps its touches. Keys
+become key events before the modifier tracker (`keys.rs`) runs, so they combine with a
+hardware keyboard; wheel steps run app commands (`view.zoomIn`, `view.rotateView`,
+`tools.increaseBrushSize`, `edit.undo`, …). The Window menu rows come through a small hook in
+`photocraft-ui-egui` (`platform_menu.rs`, `Services::platform_menu`).
+
 ## Build
 
 Requirements: Rust (see `rust-version` in the workspace `Cargo.toml`) with
@@ -106,6 +134,7 @@ through the image's ARM translation; SwiftShader (software Vulkan).
 | Soft keyboard: typing into the New Document name, Enter confirms, keyboard hides | works |
 | Stylus stroke (`adb shell input stylus swipe`): Java → JNI → `photocraft-tablet` → `StylusFeed` (logcat: `first pen sample`) → brush stroke | works |
 | Finger stroke | works (full width, like a mouse) |
+| Shortcut Pad: shows on the right, moves left (Window menu), keys (Undo, a preset changed to Eraser), wheel zoom and rotate, centre switches function, settings persist across restarts | works |
 | Keyboard shortcuts with modifiers (`adb shell input keycombination`): Ctrl+N opens New Document, Ctrl+Z undoes a stroke, Ctrl+Shift+S opens the save picker | works |
 | Ctrl+Q: unsaved-work prompt, then the app closes at once and reopens normally | works |
 | File › Save As → system picker → PSD written to the picked document (valid `8BPS` header, 1920×1080 RGB/8) | works |
@@ -113,7 +142,8 @@ through the image's ARM translation; SwiftShader (software Vulkan).
 
 Not covered by the emulator: real pressure curves, tilt and the eraser end (adb injects
 pressure 1.0 and no tilt; the mapping is unit-tested in `photocraft-tablet`), a hardware GPU
-driver, and real-device performance.
+driver, real-device performance, and holding a Shortcut Pad key while the pen draws (adb
+injects one touch at a time; the routing is unit-tested in `src/pad/router.rs`).
 
 ## Supported
 
