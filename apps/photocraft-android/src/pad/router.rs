@@ -13,7 +13,10 @@ use egui::{Event, Pos2, Rect, TouchId, TouchPhase, pos2, vec2};
 /// The pad's width in points.
 pub const WIDTH: f32 = 72.0;
 const MARGIN: f32 = 6.0;
+/// A key's height when the pad has room; keys shrink evenly towards [`MIN_KEY_H`] to fit.
 const KEY_H: f32 = 44.0;
+/// The smallest key height, still a comfortable finger target.
+pub const MIN_KEY_H: f32 = 26.0;
 const GAP: f32 = 6.0;
 const WHEEL_GAP: f32 = 12.0;
 
@@ -28,36 +31,50 @@ pub enum Control {
 }
 
 /// Where the pad's parts are, for a pad of a given size.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Layout {
     pub panel: Rect,
-    pub keys: [Rect; 4],
+    /// Top to bottom: the first half (rounded up) above the wheel, the rest below.
+    pub keys: Vec<Rect>,
     pub center: Pos2,
     pub ring_outer: f32,
     pub ring_inner: f32,
 }
 
 impl Layout {
-    /// Two keys, the wheel, two keys, centred vertically in `panel`.
-    pub fn new(panel: Rect) -> Self {
+    /// `count` keys split around the wheel (the extra one of an odd count above it), centred
+    /// vertically in `panel`. Keys are [`KEY_H`] tall where they fit and shrink evenly, down to
+    /// [`MIN_KEY_H`], on a shorter panel.
+    pub fn new(panel: Rect, count: usize) -> Self {
         let w = (panel.width() - 2.0 * MARGIN).max(1.0);
         let wheel = w;
-        let total = 4.0 * KEY_H + 2.0 * GAP + 2.0 * WHEEL_GAP + wheel;
-        let mut y = panel.center().y - total / 2.0;
+        let above = count.div_ceil(2);
+        let below = count / 2;
+        let gaps = (above.saturating_sub(1) + below.saturating_sub(1)) as f32 * GAP;
+        let fixed = wheel + 2.0 * WHEEL_GAP + gaps;
+        let key_h = if count == 0 { KEY_H } else { ((panel.height() - 2.0 * MARGIN - fixed) / count as f32).clamp(MIN_KEY_H, KEY_H) };
+        let total = count as f32 * key_h + fixed;
+        // Centred; on a panel too short even for the smallest keys, from the top.
+        let mut y = (panel.center().y - total / 2.0).max(panel.top() + MARGIN);
         let x = panel.left() + MARGIN;
-        let key = |y: &mut f32| {
-            let r = Rect::from_min_size(pos2(x, *y), vec2(w, KEY_H));
-            *y += KEY_H + GAP;
-            r
-        };
-        let k0 = key(&mut y);
-        let k1 = key(&mut y);
-        y += WHEEL_GAP - GAP;
+        let mut keys = Vec::with_capacity(count);
+        for i in 0..above {
+            keys.push(Rect::from_min_size(pos2(x, y), vec2(w, key_h)));
+            y += key_h + if i + 1 < above { GAP } else { 0.0 };
+        }
+        y += WHEEL_GAP;
         let center = pos2(x + w / 2.0, y + wheel / 2.0);
         y += wheel + WHEEL_GAP;
-        let k2 = key(&mut y);
-        let k3 = key(&mut y);
-        Self { panel, keys: [k0, k1, k2, k3], center, ring_outer: wheel / 2.0, ring_inner: wheel * 0.3 }
+        for _ in 0..below {
+            keys.push(Rect::from_min_size(pos2(x, y), vec2(w, key_h)));
+            y += key_h + GAP;
+        }
+        Self { panel, keys, center, ring_outer: wheel / 2.0, ring_inner: wheel * 0.3 }
+    }
+
+    /// The keys' height (the same for all).
+    pub fn key_height(&self) -> f32 {
+        self.keys.first().map_or(KEY_H, |k| k.height())
     }
 
     /// What a touch at `p` (inside the pad) lands on. The wheel takes a little slop around its
@@ -178,7 +195,7 @@ mod tests {
     use egui::TouchDeviceId;
 
     fn layout() -> Layout {
-        Layout::new(Rect::from_min_size(pos2(1000.0, 0.0), vec2(WIDTH, 800.0)))
+        Layout::new(Rect::from_min_size(pos2(1000.0, 0.0), vec2(WIDTH, 800.0)), 4)
     }
 
     fn touch(id: u64, phase: TouchPhase, pos: Pos2) -> Event {
@@ -197,8 +214,8 @@ mod tests {
     #[test]
     fn layout_fits_the_pad_and_parts_are_hit() {
         let l = layout();
-        for k in l.keys {
-            assert!(l.panel.contains_rect(k), "{k:?}");
+        for k in &l.keys {
+            assert!(l.panel.contains_rect(*k), "{k:?}");
         }
         assert!(l.keys[1].bottom() < l.center.y - l.ring_outer && l.keys[2].top() > l.center.y + l.ring_outer, "keys above and below the wheel");
         assert_eq!(l.hit(l.center), Control::Center);
@@ -207,6 +224,39 @@ mod tests {
             assert_eq!(l.hit(k.center()), Control::Key(i));
         }
         assert_eq!(l.hit(pos2(l.panel.center().x, l.panel.top() + 2.0)), Control::Panel);
+    }
+
+    #[test]
+    fn any_key_count_splits_around_the_wheel_and_fits() {
+        for count in 2..=10 {
+            let l = Layout::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(WIDTH, 800.0)), count);
+            assert_eq!(l.keys.len(), count);
+            let above = l.keys.iter().filter(|k| k.bottom() < l.center.y - l.ring_outer).count();
+            let below = l.keys.iter().filter(|k| k.top() > l.center.y + l.ring_outer).count();
+            assert_eq!((above, below), (count.div_ceil(2), count / 2), "{count} keys");
+            for k in &l.keys {
+                assert!(l.panel.contains_rect(*k), "{count} keys: {k:?}");
+            }
+            for pair in l.keys.windows(2) {
+                assert!(pair[0].bottom() <= pair[1].top(), "keys don't overlap");
+            }
+            for (i, k) in l.keys.iter().enumerate() {
+                assert_eq!(l.hit(k.center()), Control::Key(i), "{count} keys: key {i}");
+            }
+            assert_eq!(l.hit(l.center), Control::Center);
+        }
+    }
+
+    #[test]
+    fn keys_shrink_to_fit_a_short_screen_and_no_further() {
+        let tall = Layout::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(WIDTH, 800.0)), 10);
+        assert_eq!(tall.key_height(), 44.0, "10 full-size keys fit 800 points");
+        let short = Layout::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(WIDTH, 500.0)), 10);
+        assert!(short.key_height() < 44.0 && short.key_height() >= MIN_KEY_H, "{}", short.key_height());
+        assert!(short.keys.iter().all(|k| short.panel.contains_rect(*k)), "everything fits 500 points");
+        let tiny = Layout::new(Rect::from_min_size(pos2(0.0, 0.0), vec2(WIDTH, 200.0)), 10);
+        assert_eq!(tiny.key_height(), MIN_KEY_H, "never smaller than a finger target");
+        assert!(tiny.keys[0].top() >= tiny.panel.top(), "starts at the top rather than above it");
     }
 
     #[test]
