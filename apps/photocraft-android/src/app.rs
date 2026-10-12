@@ -49,6 +49,9 @@ fn run(android: AndroidApp) -> Result<(), String> {
             let inbox: photocraft_ui_egui::Inbox = Arc::default();
             let mut services = crate::services::services(bridge.clone(), &files_dir);
             services.inbox = Some(inbox.clone());
+            // The Shortcut Pad (Window › Shortcut Pad): its menu rows go to the app's menus.
+            let pad = crate::pad::Pad::new(&files_dir);
+            services.platform_menu = Some(pad.menu());
             crate::services::watch_incoming(bridge.clone(), inbox, cc.egui_ctx.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.background_jobs = true;
@@ -80,7 +83,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                     app.set_wgpu(rs);
                 }
             }
-            Ok(Box::new(Shell { app, android, ime: String::new(), editing: false, keys: Default::default() }))
+            Ok(Box::new(Shell { app, android, ime: String::new(), editing: false, keys: Default::default(), pad }))
         }),
     )
     .map_err(|e| e.to_string())
@@ -97,10 +100,13 @@ struct Shell {
     editing: bool,
     /// Hardware keyboard modifiers (see [`crate::keys`]).
     keys: crate::keys::Held,
+    /// The Shortcut Pad (see [`crate::pad`]).
+    pad: crate::pad::Pad,
 }
 
 impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.pad.run_pending(&mut self.app, ctx);
         self.app.logic(ctx, frame);
     }
 
@@ -134,11 +140,18 @@ impl eframe::App for Shell {
             // GameActivity's text events don't wake the UI (winit drops them): poll while typing.
             ctx.request_repaint_after(std::time::Duration::from_millis(50));
         }
+        // The pad's touches become key presses (before the modifiers are worked out from them)
+        // and wheel commands; the rest of the input goes on to the app.
+        self.pad.input(ctx, raw_input);
         self.keys.apply(raw_input);
         self.app.raw_input_hook(ctx, raw_input);
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+        // The pad first, so the app lays out beside it.
+        self.pad.show(ui, &tokens);
         self.app.ui(ui, frame);
+        self.pad.settings(ui.ctx(), &tokens);
     }
 }
