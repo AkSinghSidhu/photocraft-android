@@ -64,6 +64,10 @@ PhotoCraftActivity.java (extends GameActivity)       libphotocraft_android.so (t
 A slim strip on the left or right edge of the window with four keys and a wheel, modelled on a
 pen tablet's ExpressKeys and Touch Ring, for working without a keyboard.
 
+![PhotoCraft on an Android tablet with the Shortcut Pad on the right edge](../../docs/images/android-shortcut-pad.png)
+
+<img src="../../docs/images/android-shortcut-pad-closeup.png" alt="The Shortcut Pad: Undo and Redo keys, the wheel set to Zoom, Alt and Pan keys" width="210">
+
 - **Keys** press a shortcut while touched. `Ctrl+Z`, `B` or `Tab` act once; a modifier on its
   own (`Alt`, `Shift`, `Ctrl`) or `Space` is held for as long as the finger stays on the key, so
   the pen can Alt-click (Eyedropper, Clone Stamp source) or pan while a key is held.
