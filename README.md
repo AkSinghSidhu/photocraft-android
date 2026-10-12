@@ -12,6 +12,8 @@ sideloading.
 
 <img src="https://raw.githubusercontent.com/morte2437/photocraft-android/android-port/docs/images/android-shortcut-pad-closeup.png" alt="The Shortcut Pad: Undo and Redo keys, the wheel set to Zoom, Alt and Pan keys" width="210">
 
+<img src="docs/images/android-shortcut-pad-zoom.gif" alt="Pressing the Shortcut Pad wheel opens a large ring; spinning it zooms smoothly into The Great Wave off Kanagawa from 84% to 391%" width="640">
+
 What the port adds:
 
 - The full PhotoCraft engine and interface on Android (wgpu on Vulkan, OpenGL ES fallback).
