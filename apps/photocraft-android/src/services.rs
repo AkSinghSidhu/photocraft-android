@@ -87,9 +87,13 @@ fn write_and_sync(bridge: &Bridge, path: &Path, bytes: &[u8]) -> Result<(), Stri
     bridge.mark_written(path)
 }
 
-/// The bridge request for a dialog request.
-pub fn picker_request(id: u64, request: &FileDialogRequest) -> Request {
-    match request {
+/// Why a folder can't be chosen (the answer to `FileDialogRequest::Folder`).
+pub const NO_FOLDER_PICKER: &str = "Choosing a folder isn't supported on Android yet. Pick the files themselves instead.";
+
+/// The bridge request for a dialog request; `None` for a folder, which Android's document
+/// pickers can't hand over as a path (it would need the tree picker and a copy of the folder).
+pub fn picker_request(id: u64, request: &FileDialogRequest) -> Option<Request> {
+    Some(match request {
         FileDialogRequest::Open { multiple, extensions, .. } => {
             // Providers only filter by MIME type, and most of our formats have none they know
             // (PSD, raw, .abr…): offer everything and let the importer decide. A command that
@@ -101,7 +105,8 @@ pub fn picker_request(id: u64, request: &FileDialogRequest) -> Request {
             let name = bridge::file_name(suggested, "Untitled.png");
             Request::Save { id, mime: bridge::mime_for(&name).into(), name }
         }
-    }
+        FileDialogRequest::Folder { .. } => return None,
+    })
 }
 
 /// The dialog answer for the Activity's answer.
@@ -115,6 +120,7 @@ pub fn dialog_answer(request: &FileDialogRequest, answer: Answer) -> Option<File
     match request {
         FileDialogRequest::Open { .. } => (!answer.paths.is_empty()).then_some(FileDialogAnswer::Paths(answer.paths)),
         FileDialogRequest::Save { .. } => answer.path.map(FileDialogAnswer::SaveTo),
+        FileDialogRequest::Folder { .. } => None,
     }
 }
 
@@ -124,10 +130,14 @@ fn show_picker(bridge: &Arc<Bridge>, request: FileDialogRequest, reply: FileDial
 }
 
 /// Ask the Activity for a picker; a waiting thread calls `done` with the answer. A request that
-/// can't be made answers Cancel at once.
+/// can't be made answers Cancel at once; a folder answers that it's unavailable.
 pub fn ask(bridge: &Arc<Bridge>, request: FileDialogRequest, done: impl FnOnce(Option<FileDialogAnswer>) + Send + 'static) {
     let id = bridge.next_id();
-    if let Err(e) = bridge.request(&picker_request(id, &request)) {
+    let Some(picker) = picker_request(id, &request) else {
+        done(Some(FileDialogAnswer::Unavailable(NO_FOLDER_PICKER.into())));
+        return;
+    };
+    if let Err(e) = bridge.request(&picker) {
         log::error!("document picker: {e}");
         done(None);
         return;
@@ -178,11 +188,25 @@ mod tests {
     #[test]
     fn dialog_requests_map_to_picker_requests() {
         let open = FileDialogRequest::Open { multiple: true, initial_dir: Some("/x".into()), extensions: Some(vec!["psd".into()]) };
-        assert_eq!(picker_request(4, &open), Request::Open { id: 4, multiple: true, mimes: vec!["*/*".into()] });
+        assert_eq!(picker_request(4, &open), Some(Request::Open { id: 4, multiple: true, mimes: vec!["*/*".into()] }));
         let save = FileDialogRequest::Save { suggested: "/data/user/0/x/files/bridge/inbox/3/Cat.psd".into() };
-        assert_eq!(picker_request(5, &save), Request::Save { id: 5, name: "Cat.psd".into(), mime: "image/vnd.adobe.photoshop".into() });
+        assert_eq!(picker_request(5, &save), Some(Request::Save { id: 5, name: "Cat.psd".into(), mime: "image/vnd.adobe.photoshop".into() }));
         let unnamed = FileDialogRequest::Save { suggested: String::new() };
-        assert!(matches!(picker_request(6, &unnamed), Request::Save { name, .. } if name == "Untitled.png"));
+        assert!(matches!(picker_request(6, &unnamed), Some(Request::Save { name, .. }) if name == "Untitled.png"));
+        assert_eq!(picker_request(7, &FileDialogRequest::Folder { initial_dir: None }), None);
+    }
+
+    /// A folder request is answered at once as unavailable (an error the app shows), without
+    /// asking the Activity.
+    #[test]
+    fn a_folder_request_is_unavailable() {
+        let dir = std::env::temp_dir().join(format!("photocraft-folder-{}", std::process::id()));
+        let bridge = Arc::new(Bridge::new(&dir).unwrap());
+        let (tx, rx) = std::sync::mpsc::channel();
+        ask(&bridge, FileDialogRequest::Folder { initial_dir: Some("/x".into()) }, move |a| tx.send(a).unwrap());
+        assert_eq!(rx.recv_timeout(Duration::from_secs(1)).unwrap(), Some(FileDialogAnswer::Unavailable(NO_FOLDER_PICKER.into())));
+        assert!(!bridge.root().join("request.json").exists(), "no picker asked for");
+        std::fs::remove_dir_all(dir).ok();
     }
 
     #[test]
