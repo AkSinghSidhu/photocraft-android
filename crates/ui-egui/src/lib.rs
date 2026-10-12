@@ -154,6 +154,7 @@ pub mod pattern_preview;
 pub mod perspective_crop_ui;
 pub mod perspective_ui;
 pub mod pixel_grid;
+pub mod platform_menu;
 pub mod plugin_ui;
 pub mod point_curve;
 pub mod prefs_ui;
@@ -485,6 +486,9 @@ pub struct Services {
     /// while AppKit's run loop is still going crashes or hangs Touch Bar Macs (#1575, #1458).
     /// Without one, eframe closes the window and the app ends with it.
     pub quit: Option<QuitFn>,
+    /// Menu rows the platform shell adds, with their handler (the Android app's Shortcut Pad
+    /// under Window; see [`platform_menu`]).
+    pub platform_menu: Option<platform_menu::PlatformMenu>,
 }
 
 /// A document histogram being computed off the UI thread: (document, revision, receiver of
