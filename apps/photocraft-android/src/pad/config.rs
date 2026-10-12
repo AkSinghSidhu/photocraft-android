@@ -101,7 +101,7 @@ impl Default for PadConfig {
             keys: vec![KeySlot::new("Undo", "Ctrl+Z"), KeySlot::new("Redo", "Ctrl+Shift+Z"), KeySlot::new("Alt", "Alt"), KeySlot::new("Pan", "Space")],
             wheel_modes: vec![WheelMode::Zoom, WheelMode::Rotate, WheelMode::BrushSize],
             enlarge: true,
-            wheel_size: 240.0,
+            wheel_size: 150.0,
             sensitivity: 1.0,
         }
     }
