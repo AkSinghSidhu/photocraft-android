@@ -70,7 +70,7 @@ impl WheelMode {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct PadConfig {
     pub enabled: bool,
@@ -79,7 +79,19 @@ pub struct PadConfig {
     /// The functions the centre button cycles through, in order (never empty once
     /// [`Self::sanitized`]).
     pub wheel_modes: Vec<WheelMode>,
+    /// Pressing the wheel opens a large ring to turn (easier to hit and smoother to turn than
+    /// the small one on the pad).
+    pub enlarge: bool,
+    /// The large ring's diameter in points ([`WHEEL_SIZE_RANGE`]).
+    pub wheel_size: f32,
+    /// How much a turn changes (1: a quarter turn doubles the zoom; [`SENSITIVITY_RANGE`]).
+    pub sensitivity: f32,
 }
+
+/// The large ring's diameter range in points.
+pub const WHEEL_SIZE_RANGE: std::ops::RangeInclusive<f32> = 140.0..=400.0;
+/// The wheel sensitivity range.
+pub const SENSITIVITY_RANGE: std::ops::RangeInclusive<f32> = 0.25..=4.0;
 
 impl Default for PadConfig {
     fn default() -> Self {
@@ -88,6 +100,9 @@ impl Default for PadConfig {
             side: Side::Right,
             keys: vec![KeySlot::new("Undo", "Ctrl+Z"), KeySlot::new("Redo", "Ctrl+Shift+Z"), KeySlot::new("Alt", "Alt"), KeySlot::new("Pan", "Space")],
             wheel_modes: vec![WheelMode::Zoom, WheelMode::Rotate, WheelMode::BrushSize],
+            enlarge: true,
+            wheel_size: 240.0,
+            sensitivity: 1.0,
         }
     }
 }
@@ -108,6 +123,9 @@ impl PadConfig {
         if self.wheel_modes.is_empty() {
             self.wheel_modes = defaults.wheel_modes;
         }
+        let clamp = |v: f32, r: &std::ops::RangeInclusive<f32>, d: f32| if v.is_finite() { v.clamp(*r.start(), *r.end()) } else { d };
+        self.wheel_size = clamp(self.wheel_size, &WHEEL_SIZE_RANGE, defaults.wheel_size);
+        self.sensitivity = clamp(self.sensitivity, &SENSITIVITY_RANGE, defaults.sensitivity);
         self
     }
 

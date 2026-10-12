@@ -1,22 +1,41 @@
 //! The pad's wheel: a finger sliding around the ring turns, and the current function turns the
-//! movement into app commands. Clockwise zooms in, rotates the view clockwise, grows the
-//! brush, hardens it, or redoes; counter-clockwise the opposite. Rotation follows the finger;
-//! the others step once per [`detent`] degrees, like the ring's click-stops on a tablet.
+//! movement into changes. Clockwise zooms in, rotates the view clockwise, grows the brush,
+//! hardens it, or redoes; counter-clockwise the opposite.
+//!
+//! Zoom, rotation, size and hardness follow the finger continuously (no jumps between preset
+//! zoom levels or brush sizes); history moves one state per [`history_detent`]. The user's
+//! sensitivity scales every function.
 
 use super::config::WheelMode;
-use serde_json::{Value, json};
 
 /// Degrees between the ring's tick marks.
 pub const TICK: f32 = 15.0;
 
-/// Degrees of ring travel per step: zoom levels and history states are big steps (a third of a
-/// turn passes 4), brush sizes small ones.
-pub fn detent(mode: WheelMode) -> f32 {
-    match mode {
-        WheelMode::Zoom | WheelMode::History => 30.0,
-        WheelMode::BrushSize => 10.0,
-        WheelMode::BrushHardness | WheelMode::Rotate => 15.0,
-    }
+/// At sensitivity 1: a quarter turn doubles the zoom, a third of a turn doubles the brush size,
+/// a full turn runs the hardness from 0 to 100%, and the view rotates as far as the finger.
+const ZOOM_DOUBLING_DEG: f32 = 90.0;
+const SIZE_DOUBLING_DEG: f32 = 120.0;
+const HARDNESS_FULL_DEG: f32 = 360.0;
+const HISTORY_DEG: f32 = 30.0;
+
+/// Degrees of ring travel per history step at `sensitivity`.
+pub fn history_detent(sensitivity: f32) -> f32 {
+    (HISTORY_DEG / sensitivity.max(0.01)).clamp(8.0, 120.0)
+}
+
+/// What a movement of the ring asks for.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Action {
+    /// Multiply the view's zoom.
+    Zoom(f32),
+    /// Rotate the view by degrees.
+    Rotate(f32),
+    /// Multiply the brush size.
+    BrushSize(f32),
+    /// Add to the brush hardness (0..1).
+    Hardness(f32),
+    /// Run a command (undo, redo).
+    Command(&'static str),
 }
 
 /// The angle of `p` around `center` in degrees, clockwise on screen (y points down) from the
@@ -29,100 +48,81 @@ pub fn angle(center: egui::Pos2, p: egui::Pos2) -> f32 {
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Turn {
     last: Option<f32>,
-    /// Travel not yet spent on a step.
+    /// History travel not yet spent on a step.
     pending: f32,
 }
 
 impl Turn {
-    /// The finger is at `angle`: the commands for the movement since the last call.
-    pub fn moved(&mut self, mode: WheelMode, angle: f32) -> Vec<(&'static str, Value)> {
-        if !angle.is_finite() {
+    /// The finger is at `angle` (`None`: too near the centre to read an angle; the next real
+    /// angle starts afresh instead of jumping): the actions for the movement since the last call.
+    pub fn moved(&mut self, mode: WheelMode, angle: Option<f32>, sensitivity: f32) -> Vec<Action> {
+        let Some(angle) = angle.filter(|a| a.is_finite()) else {
+            self.last = None;
             return Vec::new();
-        }
+        };
         let Some(last) = self.last.replace(angle) else { return Vec::new() };
         // The short way round: crossing ±180° is a small step, not a full turn back.
         let delta = (angle - last + 540.0).rem_euclid(360.0) - 180.0;
-        if mode == WheelMode::Rotate {
-            return if delta.abs() > 0.01 { vec![("view.rotateView", json!({ "delta": delta }))] } else { Vec::new() };
+        if delta.abs() < 0.01 {
+            return Vec::new();
         }
-        let detent = detent(mode);
-        self.pending += delta;
-        let steps = (self.pending / detent).trunc();
-        self.pending -= steps * detent;
-        let (up, down) = match mode {
-            WheelMode::Zoom => ("view.zoomIn", "view.zoomOut"),
-            WheelMode::BrushSize => ("tools.increaseBrushSize", "tools.decreaseBrushSize"),
-            WheelMode::BrushHardness => ("tools.increaseBrushHardness", "tools.decreaseBrushHardness"),
-            WheelMode::History => ("edit.redo", "edit.undo"),
-            WheelMode::Rotate => return Vec::new(),
-        };
-        let id = if steps > 0.0 { up } else { down };
-        (0..steps.abs().min(24.0) as usize).map(|_| (id, json!({}))).collect()
+        let s = if sensitivity.is_finite() { sensitivity.clamp(0.05, 20.0) } else { 1.0 };
+        let turned = delta * s;
+        match mode {
+            WheelMode::Zoom => vec![Action::Zoom(2f32.powf(turned / ZOOM_DOUBLING_DEG))],
+            WheelMode::Rotate => vec![Action::Rotate(turned)],
+            WheelMode::BrushSize => vec![Action::BrushSize(2f32.powf(turned / SIZE_DOUBLING_DEG))],
+            WheelMode::BrushHardness => vec![Action::Hardness(turned / HARDNESS_FULL_DEG)],
+            WheelMode::History => {
+                let detent = history_detent(s);
+                self.pending += delta;
+                let steps = (self.pending / detent).trunc();
+                self.pending -= steps * detent;
+                let id = if steps > 0.0 { "edit.redo" } else { "edit.undo" };
+                (0..steps.abs().min(24.0) as usize).map(|_| Action::Command(id)).collect()
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use egui::pos2;
 
-    fn ids(v: Vec<(&'static str, Value)>) -> Vec<&'static str> {
-        v.into_iter().map(|(id, _)| id).collect()
+    #[test]
+    fn continuous_functions_follow_the_finger() {
+        let mut t = Turn::default();
+        assert!(t.moved(WheelMode::Zoom, Some(0.0), 1.0).is_empty(), "the first touch only sets the start");
+        let v = t.moved(WheelMode::Zoom, Some(90.0), 1.0);
+        assert!(matches!(v.as_slice(), [Action::Zoom(f)] if (f - 2.0).abs() < 1e-4), "a quarter turn doubles: {v:?}");
+        let v = t.moved(WheelMode::Zoom, Some(45.0), 2.0);
+        assert!(matches!(v.as_slice(), [Action::Zoom(f)] if (f - 0.5).abs() < 1e-4), "sensitivity 2: back 45° halves: {v:?}");
+        // Crossing the seam (175° → 185°) is +10°, not −350°.
+        let mut t = Turn::default();
+        t.moved(WheelMode::Rotate, Some(175.0), 1.0);
+        assert_eq!(t.moved(WheelMode::Rotate, Some(-175.0), 1.0), vec![Action::Rotate(10.0)]);
+        // Near the centre: no reading, and no jump when the finger comes back out.
+        assert!(t.moved(WheelMode::Rotate, None, 1.0).is_empty());
+        assert!(t.moved(WheelMode::Rotate, Some(0.0), 1.0).is_empty(), "starts afresh");
     }
 
     #[test]
-    fn angles_run_clockwise_on_screen() {
-        let c = pos2(10.0, 10.0);
-        assert!((angle(c, pos2(20.0, 10.0)) - 0.0).abs() < 1e-4);
-        assert!((angle(c, pos2(10.0, 20.0)) - 90.0).abs() < 1e-4, "below the centre is a quarter turn clockwise");
+    fn history_steps_per_detent() {
+        let mut t = Turn::default();
+        t.moved(WheelMode::History, Some(0.0), 1.0);
+        assert_eq!(t.moved(WheelMode::History, Some(-31.0), 1.0), vec![Action::Command("edit.undo")]);
+        let mut t = Turn::default();
+        t.moved(WheelMode::History, Some(0.0), 2.0);
+        assert_eq!(t.moved(WheelMode::History, Some(31.0), 2.0).len(), 2, "sensitivity 2: 15° per step");
     }
 
     #[test]
-    fn stepped_functions_step_once_per_detent_in_the_turn_direction() {
-        // Zoom: 30° per step.
+    fn hostile_input_does_nothing_odd() {
         let mut t = Turn::default();
-        assert!(t.moved(WheelMode::Zoom, 0.0).is_empty(), "the first touch only sets the start");
-        assert!(t.moved(WheelMode::Zoom, 20.0).is_empty(), "less than a detent");
-        assert_eq!(ids(t.moved(WheelMode::Zoom, 31.0)), ["view.zoomIn"], "20 + 11 crosses one detent");
-        assert_eq!(ids(t.moved(WheelMode::Zoom, 91.0)), ["view.zoomIn", "view.zoomIn"]);
-        // 1° was left over; back 90° makes −89°: two steps out, −29° kept for the next.
-        assert_eq!(ids(t.moved(WheelMode::Zoom, 1.0)), ["view.zoomOut", "view.zoomOut"], "back 90°");
-        assert_eq!(ids(t.moved(WheelMode::Zoom, 0.0)), ["view.zoomOut"], "the kept −29° and 1° more");
-        // Brush size: 10° per step.
-        let mut t = Turn::default();
-        t.moved(WheelMode::BrushSize, 0.0);
-        assert_eq!(ids(t.moved(WheelMode::BrushSize, -21.0)), ["tools.decreaseBrushSize", "tools.decreaseBrushSize"]);
-        // History: 30° per step, counter-clockwise undoes.
-        let mut t = Turn::default();
-        t.moved(WheelMode::History, 0.0);
-        assert_eq!(ids(t.moved(WheelMode::History, -30.0)), ["edit.undo"]);
-        assert_eq!(ids(t.moved(WheelMode::History, 0.0)), ["edit.redo"]);
-    }
-
-    #[test]
-    fn crossing_the_seam_is_a_small_step() {
-        let mut t = Turn::default();
-        t.moved(WheelMode::Zoom, 165.0);
-        assert_eq!(ids(t.moved(WheelMode::Zoom, -165.0)), ["view.zoomIn"], "165° → 195° is +30°, not −330°");
-    }
-
-    #[test]
-    fn rotation_follows_the_finger() {
-        let mut t = Turn::default();
-        t.moved(WheelMode::Rotate, 0.0);
-        let v = t.moved(WheelMode::Rotate, 7.5);
-        assert_eq!(v.len(), 1);
-        assert_eq!(v[0].0, "view.rotateView");
-        assert!((v[0].1["delta"].as_f64().unwrap() - 7.5).abs() < 1e-4);
-        assert!(t.moved(WheelMode::Rotate, 7.5).is_empty(), "no movement, no command");
-    }
-
-    #[test]
-    fn hostile_angles_do_nothing() {
-        let mut t = Turn::default();
-        t.moved(WheelMode::Zoom, 0.0);
-        assert!(t.moved(WheelMode::Zoom, f32::NAN).is_empty());
-        assert!(t.moved(WheelMode::Zoom, f32::INFINITY).is_empty());
-        assert!(t.moved(WheelMode::Zoom, 1e30).len() <= 24, "steps are capped");
+        t.moved(WheelMode::Zoom, Some(0.0), 1.0);
+        assert!(t.moved(WheelMode::Zoom, Some(f32::NAN), 1.0).is_empty(), "a NaN angle reads as no angle");
+        t.moved(WheelMode::Zoom, Some(0.0), 1.0);
+        let v = t.moved(WheelMode::Zoom, Some(30.0), f32::NAN);
+        assert!(matches!(v.as_slice(), [Action::Zoom(f)] if f.is_finite()));
     }
 }

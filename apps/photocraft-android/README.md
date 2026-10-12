@@ -75,13 +75,17 @@ without a keyboard.
   Defaults: Undo, Redo, Alt, Pan (Space). With an odd number of keys the extra one sits above
   the wheel. Keys are 44 points tall where they fit and shrink evenly (to 26 points) on a
   shorter screen, so ten fit any tablet.
-- **The wheel**: slide a finger around the ring. Clockwise zooms in (one level per 30°), rotates
-  the view (follows the finger), grows the brush (10°), hardens it (15°) or redoes (30°);
-  counter-clockwise does the opposite. Tap the centre to switch function; the lights on the ring
-  show which one of the chosen functions is active, the centre names it.
+- **The wheel**: press it (anywhere, centre included) and a large ring opens beside the pad;
+  slide your finger around it. Clockwise zooms in, rotates the view, grows or hardens the brush,
+  or redoes; counter-clockwise does the opposite. Zoom, rotation, size and hardness change
+  smoothly (at sensitivity 1×, a quarter turn doubles the zoom, a third of a turn doubles the
+  brush size, a full turn runs hardness 0–100%); undo/redo steps every 30°. The ring shows the
+  function and its value (zoom %, angle, size, hardness). A tap on the centre without sliding
+  switches function; the lights on the small wheel show which one is active.
 - **Window › Shortcut Pad**: Show Shortcut Pad, On the Left / On the Right, and Shortcut Pad
   Settings… (the number of keys; each key's label and shortcut, from presets or typed; which
-  functions the wheel's centre cycles through; Restore Defaults). Adding keys fills them with the
+  functions the wheel's centre cycles through; whether the large ring opens, its size
+  (140–400 points) and the wheel's sensitivity (0.25×–4×); Restore Defaults). Adding keys fills them with the
   presets no key uses yet; removing takes them from the bottom. Settings are saved in the app's files directory
   (`shortcut-pad.json`).
 
