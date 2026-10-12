@@ -1,12 +1,13 @@
-//! The Shortcut Pad: a slim strip on the left or right edge of the window with four keys and a
-//! wheel, like the ExpressKeys and Touch Ring of a pen tablet.
+//! The Shortcut Pad: a slim strip on the left or right edge of the window with 2 to 10 keys
+//! (split above and below) and a wheel, like the ExpressKeys and Touch Ring of a pen tablet.
 //!
 //! - A key presses its shortcut while it is touched: `Ctrl+Z` undoes, a modifier on its own
 //!   (`Alt`) is held, so the pen Alt-clicks while a finger rests on the key.
 //! - Sliding a finger around the wheel zooms, rotates the view, sizes or hardens the brush, or
 //!   steps through history; tapping its centre switches to the next of the chosen functions.
 //! - Window › Shortcut Pad shows or hides it, moves it to either side and opens its settings
-//!   (keys and wheel functions), which are saved in the app's files directory.
+//!   (how many keys, each key's shortcut, the wheel's functions), which are saved in the app's
+//!   files directory.
 //!
 //! Touch routing ([`router`]) keeps the pad's fingers away from the canvas, so a key can be held
 //! while the pen draws.
@@ -15,7 +16,7 @@ pub mod config;
 pub mod router;
 pub mod wheel;
 
-use config::{Chord, KEYS, PadConfig, Side, WheelMode};
+use config::{Chord, MAX_KEYS, MIN_KEYS, PadConfig, Side, WheelMode};
 use egui::{Align2, Event, FontId, Key, Modifiers, Stroke};
 use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::menus::MenuItem;
@@ -138,7 +139,7 @@ impl Pad {
     /// become key presses and wheel commands, the rest reaches the app.
     pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
         let shown = self.shared.borrow().config.enabled;
-        let layout = if shown { self.layout } else { None };
+        let layout = if shown { self.layout.clone() } else { None };
         // A window or menu drawn over the pad last frame (the settings window, a menu dropping
         // down) keeps the touches there.
         let covered = |p: egui::Pos2| ctx.layer_id_at(p).is_some_and(|l| l.order != egui::Order::Background);
@@ -177,13 +178,13 @@ impl Pad {
                 }
             }
             PadTouch::Down(Control::Ring, p) | PadTouch::Move(Control::Ring, p) => {
-                if let Some(l) = self.layout {
+                if let Some(center) = self.layout.as_ref().map(|l| l.center) {
                     if matches!(t, PadTouch::Down(..)) {
                         self.turn = wheel::Turn::default();
                         self.turning = true;
                     }
                     let mode = self.mode();
-                    self.pending.extend(self.turn.moved(mode, wheel::angle(l.center, p)));
+                    self.pending.extend(self.turn.moved(mode, wheel::angle(center, p)));
                 }
             }
             PadTouch::Up(Control::Ring) => self.turning = false,
@@ -231,7 +232,7 @@ impl Pad {
             .resizable(false)
             .frame(frame)
             .show(ui, |ui| {
-                let l = Layout::new(ui.max_rect());
+                let l = Layout::new(ui.max_rect(), config.keys.len());
                 self.paint(ui.painter(), &l, &config, mode, tk);
                 l
             })
@@ -240,12 +241,23 @@ impl Pad {
     }
 
     fn paint(&self, p: &egui::Painter, l: &Layout, config: &PadConfig, mode: WheelMode, tk: &Tokens) {
+        // Labels a size smaller on keys shrunk to fit a short screen.
+        let font = FontId::proportional(if l.key_height() < 36.0 { 11.0 } else { 12.0 });
         for (i, rect) in l.keys.iter().enumerate() {
             let down = self.held.contains_key(&i);
             p.rect(*rect, tk.radius, if down { tk.accent } else { tk.field }, Stroke::new(1.0, tk.field_border), egui::StrokeKind::Inside);
             let label = config.keys.get(i).map(|k| k.label.as_str()).unwrap_or("");
-            let label: String = label.chars().take(8).collect();
-            p.text(rect.center(), Align2::CENTER_CENTER, label, FontId::proportional(12.0), if down { tk.primary_text } else { tk.text });
+            let label = label.to_string();
+            let color = if down { tk.primary_text } else { tk.text };
+            // The largest size that fits the key's width (typed labels can be wide), clipped
+            // to the key at the smallest.
+            let room = rect.width() - 6.0;
+            let galley = [font.size, font.size - 1.0, font.size - 2.0, 9.0]
+                .into_iter()
+                .map(|size| p.layout_no_wrap(label.clone(), FontId::proportional(size), color))
+                .find(|g| g.size().x <= room)
+                .unwrap_or_else(|| p.layout_no_wrap(label.clone(), FontId::proportional(9.0), color));
+            p.with_clip_rect(rect.shrink(2.0)).galley(rect.center() - galley.size() / 2.0, galley, color);
         }
         // The ring, with click-stop marks, and the centre button naming the function.
         let ring = if self.turning { tk.accent } else { tk.field_border };
@@ -289,36 +301,47 @@ impl Pad {
                     ui.radio_value(&mut c.side, Side::Right, "Right");
                 });
                 ui.separator();
-                ui.label("Keys (top to bottom). A modifier on its own, such as Alt, is held while the key is touched.");
-                egui::Grid::new("pad_keys").num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
-                    ui.label("");
-                    ui.label("Label");
-                    ui.label("Preset");
-                    ui.label("Shortcut");
-                    ui.end_row();
-                    for (i, key) in c.keys.iter_mut().enumerate().take(KEYS) {
-                        ui.label(format!("Key {}", i + 1));
-                        ui.add_sized([84.0, 24.0], egui::TextEdit::singleline(&mut key.label).char_limit(8));
-                        egui::ComboBox::from_id_salt(("pad_preset", i)).selected_text("Choose…").width(110.0).show_ui(ui, |ui| {
-                            for (label, shortcut) in config::PRESETS {
-                                if ui.selectable_label(key.shortcut == *shortcut, format!("{label}  ({shortcut})")).clicked() {
-                                    key.label = (*label).into();
-                                    key.shortcut = (*shortcut).into();
-                                }
-                            }
-                            if ui.selectable_label(key.shortcut.is_empty(), "Nothing").clicked() {
-                                key.label.clear();
-                                key.shortcut.clear();
-                            }
-                        });
-                        ui.vertical(|ui| {
-                            ui.add_sized([130.0, 24.0], egui::TextEdit::singleline(&mut key.shortcut).hint_text("e.g. Ctrl+Z"));
-                            if let Err(e) = config::parse(&key.shortcut) {
-                                ui.colored_label(tk.danger, e);
-                            }
-                        });
-                        ui.end_row();
+                ui.horizontal(|ui| {
+                    ui.label("Number of keys:");
+                    let mut n = c.keys.len();
+                    if ui.add(egui::Slider::new(&mut n, MIN_KEYS..=MAX_KEYS)).changed() {
+                        c.set_key_count(n);
                     }
+                    ui.label(format!("{} above the wheel, {} below", n.div_ceil(2), n / 2));
+                });
+                ui.label("Keys (top to bottom). A modifier on its own, such as Alt, is held while the key is touched.");
+                let above = c.keys.len().div_ceil(2);
+                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                    egui::Grid::new("pad_keys").num_columns(4).spacing([8.0, 6.0]).show(ui, |ui| {
+                        ui.label("");
+                        ui.label("Label");
+                        ui.label("Preset");
+                        ui.label("Shortcut");
+                        ui.end_row();
+                        for (i, key) in c.keys.iter_mut().enumerate() {
+                            ui.label(format!("Key {}", i + 1)).on_hover_text(if i < above { "Above the wheel" } else { "Below the wheel" });
+                            ui.add_sized([84.0, 24.0], egui::TextEdit::singleline(&mut key.label).char_limit(8));
+                            egui::ComboBox::from_id_salt(("pad_preset", i)).selected_text("Choose…").width(110.0).show_ui(ui, |ui| {
+                                for (name, label, shortcut) in config::PRESETS {
+                                    if ui.selectable_label(key.shortcut == *shortcut, format!("{name}  ({shortcut})")).clicked() {
+                                        key.label = (*label).into();
+                                        key.shortcut = (*shortcut).into();
+                                    }
+                                }
+                                if ui.selectable_label(key.shortcut.is_empty(), "Nothing").clicked() {
+                                    key.label.clear();
+                                    key.shortcut.clear();
+                                }
+                            });
+                            ui.vertical(|ui| {
+                                ui.add_sized([130.0, 24.0], egui::TextEdit::singleline(&mut key.shortcut).hint_text("e.g. Ctrl+Z"));
+                                if let Err(e) = config::parse(&key.shortcut) {
+                                    ui.colored_label(tk.danger, e);
+                                }
+                            });
+                            ui.end_row();
+                        }
+                    });
                 });
                 ui.separator();
                 ui.label("Wheel: tapping its centre switches between");
@@ -385,7 +408,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("photocraft-padmod-{}-{}", std::process::id(), rand()));
         std::fs::create_dir_all(&dir).unwrap();
         let mut p = Pad::new(&dir);
-        p.layout = Some(Layout::new(Rect::from_min_size(pos2(1000.0, 0.0), vec2(router::WIDTH, 800.0))));
+        p.layout = Some(Layout::new(Rect::from_min_size(pos2(1000.0, 0.0), vec2(router::WIDTH, 800.0)), 4));
         (p, dir)
     }
 
@@ -418,7 +441,7 @@ mod tests {
     #[test]
     fn a_key_presses_its_shortcut_and_releases_it() {
         let (mut p, dir) = pad();
-        let k0 = p.layout.unwrap().keys[0].center();
+        let k0 = p.layout.clone().unwrap().keys[0].center();
         // Default key 1: Undo (Ctrl+Z).
         let down = run(&mut p, vec![touch(1, TouchPhase::Start, k0)]);
         assert_eq!(keys(&down), [(Key::ControlLeft, true), (Key::Z, true)]);
@@ -431,7 +454,7 @@ mod tests {
     #[test]
     fn a_modifier_key_is_held_while_touched() {
         let (mut p, dir) = pad();
-        let k2 = p.layout.unwrap().keys[2].center(); // default: Alt
+        let k2 = p.layout.clone().unwrap().keys[2].center(); // default: Alt
         assert_eq!(keys(&run(&mut p, vec![touch(1, TouchPhase::Start, k2)])), [(Key::AltLeft, true)]);
         assert!(keys(&run(&mut p, vec![touch(1, TouchPhase::Move, k2)])).is_empty(), "held, not repeated");
         // Hiding the pad releases it (no stuck Alt).
@@ -443,7 +466,7 @@ mod tests {
     #[test]
     fn the_wheel_queues_commands_and_the_centre_switches_function() {
         let (mut p, dir) = pad();
-        let l = p.layout.unwrap();
+        let l = p.layout.clone().unwrap();
         let at = |deg: f32| l.center + vec2(deg.to_radians().cos(), deg.to_radians().sin()) * (l.ring_outer - 4.0);
         run(&mut p, vec![touch(1, TouchPhase::Start, at(0.0)), touch(1, TouchPhase::Move, at(35.0)), touch(1, TouchPhase::Move, at(70.0))]);
         assert_eq!(p.pending.iter().map(|(id, _)| *id).collect::<Vec<_>>(), ["view.zoomIn", "view.zoomIn"], "default first function: zoom");
@@ -474,6 +497,22 @@ mod tests {
         let again = Pad::new(&dir);
         assert_eq!(again.shared.borrow().config.side, Side::Left);
         assert!((menu.run)("android.pad.bogus").is_err());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    /// Ten keys: the sixth (the first below the wheel) presses its own shortcut.
+    #[test]
+    fn a_ten_key_pad_routes_every_key() {
+        let (mut p, dir) = pad();
+        p.shared.borrow_mut().config.set_key_count(10);
+        let count = p.shared.borrow().config.keys.len();
+        p.layout = Some(Layout::new(Rect::from_min_size(pos2(1000.0, 0.0), vec2(router::WIDTH, 800.0)), count));
+        let l = p.layout.clone().unwrap();
+        assert!(l.keys[5].top() > l.center.y, "key 6 is the first below the wheel");
+        let shortcut = p.shared.borrow().config.keys[5].shortcut.clone();
+        let chord = config::parse(&shortcut).unwrap();
+        let down = run(&mut p, vec![touch(1, TouchPhase::Start, l.keys[5].center())]);
+        assert_eq!(keys(&down), keys(&press(chord)), "{shortcut}");
         std::fs::remove_dir_all(dir).ok();
     }
 

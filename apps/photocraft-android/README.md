@@ -61,8 +61,9 @@ PhotoCraftActivity.java (extends GameActivity)       libphotocraft_android.so (t
 
 ## Shortcut Pad
 
-A slim strip on the left or right edge of the window with four keys and a wheel, modelled on a
-pen tablet's ExpressKeys and Touch Ring, for working without a keyboard.
+A slim strip on the left or right edge of the window with 2 to 10 keys (4 by default) split
+above and below a wheel, modelled on a pen tablet's ExpressKeys and Touch Ring, for working
+without a keyboard.
 
 ![PhotoCraft on an Android tablet with the Shortcut Pad on the right edge](../../docs/images/android-shortcut-pad.png)
 
@@ -71,14 +72,17 @@ pen tablet's ExpressKeys and Touch Ring, for working without a keyboard.
 - **Keys** press a shortcut while touched. `Ctrl+Z`, `B` or `Tab` act once; a modifier on its
   own (`Alt`, `Shift`, `Ctrl`) or `Space` is held for as long as the finger stays on the key, so
   the pen can Alt-click (Eyedropper, Clone Stamp source) or pan while a key is held.
-  Defaults: Undo, Redo, Alt, Pan (Space).
+  Defaults: Undo, Redo, Alt, Pan (Space). With an odd number of keys the extra one sits above
+  the wheel. Keys are 44 points tall where they fit and shrink evenly (to 26 points) on a
+  shorter screen, so ten fit any tablet.
 - **The wheel**: slide a finger around the ring. Clockwise zooms in (one level per 30°), rotates
   the view (follows the finger), grows the brush (10°), hardens it (15°) or redoes (30°);
   counter-clockwise does the opposite. Tap the centre to switch function; the lights on the ring
   show which one of the chosen functions is active, the centre names it.
 - **Window › Shortcut Pad**: Show Shortcut Pad, On the Left / On the Right, and Shortcut Pad
-  Settings… (each key's label and shortcut, from presets or typed; which functions the wheel's
-  centre cycles through; Restore Defaults). Settings are saved in the app's files directory
+  Settings… (the number of keys; each key's label and shortcut, from presets or typed; which
+  functions the wheel's centre cycles through; Restore Defaults). Adding keys fills them with the
+  presets no key uses yet; removing takes them from the bottom. Settings are saved in the app's files directory
   (`shortcut-pad.json`).
 
 How it works (`src/pad/`): the pad is an egui side panel drawn before the app, so the app lays
