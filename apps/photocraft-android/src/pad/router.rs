@@ -84,7 +84,8 @@ impl Layout {
         if d <= self.ring_inner {
             return Control::Center;
         }
-        if d <= self.ring_outer + WHEEL_GAP / 2.0 {
+        // The whole width of the pad beside the wheel is the ring: easy to hit with a finger.
+        if d <= self.ring_outer + WHEEL_GAP / 2.0 || (p.y - self.center.y).abs() <= self.ring_outer + WHEEL_GAP / 2.0 {
             return Control::Ring;
         }
         self.keys.iter().position(|k| k.expand(GAP / 2.0).contains(p)).map_or(Control::Panel, Control::Key)
