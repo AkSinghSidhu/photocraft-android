@@ -10,8 +10,7 @@
 prototype for arm64 Android tablets (Android 8.0 or newer), signed with a debug key for
 sideloading.
 
-![PhotoCraft on an Android tablet with the Shortcut Pad on the right edge](<img src="https://raw.githubusercontent.com/morte2437/photocraft-android/android-port/docs/images/android-shortcut-pad-closeup.png" alt="The Shortcut Pad: Undo and Redo keys, the wheel set to Zoom, Alt and Pan keys" width="210">)
-
+<img src="https://raw.githubusercontent.com/morte2437/photocraft-android/android-port/docs/images/android-shortcut-pad-closeup.png" alt="The Shortcut Pad: Undo and Redo keys, the wheel set to Zoom, Alt and Pan keys" width="210">
 
 What the port adds:
 
