@@ -150,7 +150,7 @@ impl eframe::App for Shell {
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
         // The pad first, so the app lays out beside it.
-        self.pad.show(ui, &tokens);
+        self.pad.show(ui, &tokens, &self.app);
         self.app.ui(ui, frame);
         self.pad.settings(ui.ctx(), &tokens);
     }
