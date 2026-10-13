@@ -21,6 +21,16 @@ command -v cargo-ndk >/dev/null || { echo "error: cargo-ndk not found (cargo ins
 FEATURE_ARGS=()
 if [[ -n "${FEATURES:-}" ]]; then FEATURE_ARGS=(--features "$FEATURES"); fi
 
+# Keep this machine's folders (and the user name in them) out of the library: rustc records
+# source paths for panic messages. Map the Cargo home, the workspace and the target directory to
+# neutral prefixes (both spellings on Windows, where rustc sees `C:\...` paths).
+remap() {
+    printf ' --remap-path-prefix=%s=%s' "$1" "$2"
+    if command -v cygpath >/dev/null; then printf ' --remap-path-prefix=%s=%s' "$(cygpath -w "$1")" "$2"; fi
+}
+REMAP="$(remap "${CARGO_HOME:-$HOME/.cargo}" /cargo)$(remap "$ROOT" /photocraft)$(remap "${CARGO_TARGET_DIR:-$ROOT/target}" /target)"
+export CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS="${CARGO_TARGET_AARCH64_LINUX_ANDROID_RUSTFLAGS:-}$REMAP"
+
 cd "$ROOT"
 cargo ndk -t arm64-v8a -P "$API" -o "$HERE/android/app/src/main/jniLibs" \
     build -p photocraft-android --profile "$PROFILE" "${FEATURE_ARGS[@]}"
