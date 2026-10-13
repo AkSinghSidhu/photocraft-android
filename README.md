@@ -6,9 +6,15 @@
 > developers or ArtCraft. For the official desktop and web app, go to
 > [storytold/photocraft](https://github.com/storytold/photocraft).
 
-**[⬇ Download the APK](https://github.com/morte2437/photocraft-android/releases/latest)**: a
-prototype for arm64 Android tablets (Android 8.0 or newer), signed with a debug key for
-sideloading.
+**[⬇ Download Page](https://github.com/morte2437/photocraft-android/releases/latest)**
+
+**[⬇ Direct APK download link](https://github.com/morte2437/photocraft-android/releases/download/android-v0.8.1/photocraft-0.8.1-arm64-v8a.apk)**
+
+A prototype for arm64 Android tablets (Android 8.0 or newer), signed with a debug key for
+sideloading. 
+
+
+**Includes Wacom style hot keys. More mobile features to come soon!**
 
 <img src="https://raw.githubusercontent.com/morte2437/photocraft-android/android-port/docs/images/android-shortcut-pad-closeup.png" alt="The Shortcut Pad: Undo and Redo keys, the wheel set to Zoom, Alt and Pan keys" width="210">
 
