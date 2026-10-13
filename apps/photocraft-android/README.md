@@ -75,13 +75,19 @@ without a keyboard.
   Defaults: Undo, Redo, Alt, Pan (Space). With an odd number of keys the extra one sits above
   the wheel. Keys are 44 points tall where they fit and shrink evenly (to 26 points) on a
   shorter screen, so ten fit any tablet.
-- **The wheel**: press it (anywhere, centre included) and a large ring opens beside the pad;
+- **The wheel**: press the ring and a large ring opens beside the pad;
   slide your finger around it. Clockwise zooms in, rotates the view, grows or hardens the brush,
   or redoes; counter-clockwise does the opposite. Zoom, rotation, size and hardness change
   smoothly (at sensitivity 1×, a quarter turn doubles the zoom, a third of a turn doubles the
   brush size, a full turn runs hardness 0–100%); undo/redo steps every 30°. The ring shows the
-  function and its value (zoom %, angle, size, hardness). A tap on the centre without sliding
-  switches function; the lights on the small wheel show which one is active.
+  function and its value (zoom %, angle, size, hardness). The centre is a button: a tap
+  switches function without opening the large ring; the lights on the small wheel show which
+  one is active.
+- **Keyboard key** (always at the very bottom): opens the on-screen keyboard with no text field
+  needed, and closes it when tapped again (or put the keyboard away with its own hide key; the
+  pad's key, lit while the keyboard is open, goes dark). With no field focused, letters and
+  numbers act as their shortcut keys (`E` picks the Eraser; with a pad key set to `Ctrl` held,
+  `S` saves); in a text field it types as usual.
 - **Window › Shortcut Pad**: Show Shortcut Pad, On the Left / On the Right, and Shortcut Pad
   Settings… (the number of keys; each key's label and shortcut, from presets or typed; which
   functions the wheel's centre cycles through; whether the large ring opens, its size
@@ -147,6 +153,7 @@ through the image's ARM translation; SwiftShader (software Vulkan).
 | Stylus stroke (`adb shell input stylus swipe`): Java → JNI → `photocraft-tablet` → `StylusFeed` (logcat: `first pen sample`) → brush stroke | works |
 | Finger stroke | works (full width, like a mouse) |
 | Shortcut Pad: shows on the right, moves left (Window menu), keys (Undo, a preset changed to Eraser), wheel zoom and rotate, centre switches function, settings persist across restarts | works |
+| Shortcut Pad keyboard key: opens the on-screen keyboard with no field focused, `e` picks the Eraser, hiding the keyboard turns the key off | works |
 | Keyboard shortcuts with modifiers (`adb shell input keycombination`): Ctrl+N opens New Document, Ctrl+Z undoes a stroke, Ctrl+Shift+S opens the save picker | works |
 | Ctrl+Q: unsaved-work prompt, then the app closes at once and reopens normally | works |
 | File › Save As → system picker → PSD written to the picked document (valid `8BPS` header, 1920×1080 RGB/8) | works |
@@ -167,7 +174,7 @@ OpenRaster import, export settings, preferences, brush presets.
 
 | Area | State on Android |
 |---|---|
-| On-screen keyboard | Typing works (see above), but the keyboard covers the lower half of the screen without resizing the UI; shortcuts with modifiers need a hardware keyboard. Typing on a Type layer on the canvas is untested. |
+| On-screen keyboard | Typing works (see above), but the keyboard covers the lower half of the screen without resizing the UI (including the pad's keyboard key: use the keyboard's own hide key). Shortcuts with modifiers need a hardware keyboard or a pad key holding the modifier. Typing on a Type layer on the canvas is untested. |
 | Touch gestures | Fingers act as a mouse (egui's touch emulation): no pinch-zoom/two-finger pan of the canvas and no palm rejection (a resting palm can click or paint; the pen's pressure/tilt are unaffected by it). Use the zoom/hand tools. |
 | Pen hover | Hover moves are not forwarded by winit 0.30: no brush cursor preview while hovering. The eraser end switches tools on contact, not on proximity, so the first eraser-end touch after flipping still uses the previous tool for that stroke. |
 | Barrel rotation | Android has no standard axis for it: rotation stays 0 (Wacom Art Pen rotation is not read). |
