@@ -65,7 +65,7 @@ impl Bridge {
         for dir in ["inbox", "out", "sync", "incoming"] {
             std::fs::create_dir_all(root.join(dir))?;
         }
-        for stale in ["request.json", "answer.json", "quit"] {
+        for stale in ["request.json", "answer.json", "quit", "keyboard-hidden"] {
             let _ = std::fs::remove_file(root.join(stale));
         }
         // Ids only need to be unique within a run; start from the clock so a late answer from
@@ -106,6 +106,12 @@ impl Bridge {
         }
         let text = serde_json::to_vec(&serde_json::json!({ "path": path.to_string_lossy() })).map_err(|e| e.to_string())?;
         write_then_rename(&self.root.join("sync").join(format!("{}.json", self.next_id())), &text)
+    }
+
+    /// Whether the on-screen keyboard was put away since the last call (the Activity leaves a
+    /// `keyboard-hidden` marker; winit drops the event).
+    pub fn take_keyboard_hidden(&self) -> bool {
+        std::fs::remove_file(self.root.join("keyboard-hidden")).is_ok()
     }
 
     /// Ask the Activity to finish (see the module docs).

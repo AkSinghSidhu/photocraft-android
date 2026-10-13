@@ -6,7 +6,9 @@
 //! - Pressing the wheel opens a large ring (its size is a setting); sliding the finger around it
 //!   zooms, rotates the view, sizes or hardens the brush (all smoothly), or steps through
 //!   history, at the chosen sensitivity. Tapping the centre switches to the next of the chosen
-//!   functions.
+//!   functions (without opening the ring).
+//! - The key at the very bottom, always there, opens the on-screen keyboard (and closes it
+//!   again); its letters reach the app's shortcuts.
 //! - Window › Shortcut Pad shows or hides it, moves it to either side and opens its settings
 //!   (how many keys, each key's shortcut, the wheel's functions), which are saved in the app's
 //!   files directory.
@@ -75,6 +77,10 @@ pub struct Pad {
     /// the centre switches function, a slide turns).
     press: Option<(Control, egui::Pos2)>,
     slid: bool,
+    /// The keyboard key was tapped (the shell opens or closes the on-screen keyboard).
+    keyboard_tapped: bool,
+    /// The shell has the on-screen keyboard open for the pad (the key is lit).
+    pub keyboard_on: bool,
     /// The window's content area last frame (keeps the large ring on screen).
     screen: egui::Rect,
     /// Brush size and hardness as the turn has set them, unrounded, so slow turns add up.
@@ -121,6 +127,8 @@ impl Pad {
             finger: None,
             press: None,
             slid: false,
+            keyboard_tapped: false,
+            keyboard_on: false,
             screen: egui::Rect::NOTHING,
             size_target: None,
             hardness_target: None,
@@ -221,9 +229,20 @@ impl Pad {
                     out.extend(release(chord));
                 }
             }
-            // The whole wheel, centre included, opens the large ring; a tap on the centre that
-            // doesn't slide switches function when lifted.
-            PadTouch::Down(Control::Ring | Control::Center, p) | PadTouch::Move(Control::Ring | Control::Center, p) => {
+            PadTouch::Down(Control::Keyboard, _) => self.keyboard_tapped = true,
+            // The centre is a button: a tap that doesn't slide switches function when lifted,
+            // and it neither opens the large ring nor turns.
+            PadTouch::Down(Control::Center, p) => {
+                self.press = Some((Control::Center, p));
+                self.slid = false;
+            }
+            PadTouch::Move(Control::Center, p) => {
+                if self.press.is_some_and(|(_, start)| start.distance(p) > 12.0) {
+                    self.slid = true;
+                }
+            }
+            // The ring opens the large ring and turns.
+            PadTouch::Down(Control::Ring, p) | PadTouch::Move(Control::Ring, p) => {
                 let Some((center, small_r)) = self.layout.as_ref().map(|l| (l.center, l.ring_outer)) else { return };
                 if let PadTouch::Down(control, _) = t {
                     self.press = Some((control, p));
@@ -236,9 +255,6 @@ impl Pad {
                     self.big = c.enlarge.then(|| big_ring(center, c.wheel_size / 2.0, self.screen, c.side));
                 }
                 self.finger = Some(p);
-                if self.press.is_some_and(|(_, start)| start.distance(p) > 12.0) {
-                    self.slid = true;
-                }
                 let (c, r) = self.big.map_or((center, small_r), |b| (b.center, b.radius));
                 // Too near the centre for a steady angle: wait for the finger to come out.
                 let angle = (p.distance(c) >= r * 0.2).then(|| wheel::angle(c, p));
@@ -423,6 +439,26 @@ impl Pad {
             p.circle_filled(at, 2.2, if k == current { tk.accent } else { tk.text_faint });
         }
         p.text(l.center, Align2::CENTER_CENTER, mode.short(), FontId::proportional(9.0), tk.text_dim);
+        self.paint_keyboard_key(p, l.keyboard, tk);
+    }
+
+    /// The keyboard key: a small keyboard drawn in it (keys and a space bar), lit while open.
+    fn paint_keyboard_key(&self, p: &egui::Painter, rect: egui::Rect, tk: &Tokens) {
+        let on = self.keyboard_on;
+        p.rect(rect, tk.radius, if on { tk.accent } else { tk.field }, Stroke::new(1.0, tk.field_border), egui::StrokeKind::Inside);
+        let ink = if on { tk.primary_text } else { tk.text };
+        let body = egui::Rect::from_center_size(rect.center(), egui::vec2(30.0, 18.0).min(rect.size() - egui::vec2(6.0, 6.0)));
+        p.rect_stroke(body, 2.0, Stroke::new(1.2, ink), egui::StrokeKind::Inside);
+        let (cols, key) = (5, body.width() / 7.0);
+        for row in 0..2 {
+            for col in 0..cols {
+                let x = body.left() + key * (1.0 + col as f32 * 1.0) + key / 2.0;
+                let y = body.top() + body.height() * (0.3 + row as f32 * 0.22);
+                p.circle_filled(egui::pos2(x, y), 1.2, ink);
+            }
+        }
+        let bar = body.bottom() - body.height() * 0.24;
+        p.line_segment([egui::pos2(body.center().x - key * 1.5, bar), egui::pos2(body.center().x + key * 1.5, bar)], Stroke::new(1.5, ink));
     }
 
     /// The settings window, when open (after the app, so it sits on top).
@@ -519,6 +555,11 @@ impl Pad {
             s.config = c.sanitized();
             s.save();
         }
+    }
+
+    /// Whether the keyboard key was tapped since the last call.
+    pub fn take_keyboard_tap(&mut self) -> bool {
+        std::mem::take(&mut self.keyboard_tapped)
     }
 
     /// Whether the pad needs frames: a finger is on it.
@@ -628,9 +669,24 @@ mod tests {
         run(&mut p, vec![touch(1, TouchPhase::End, on_big(45.0))]);
         assert!(p.big.is_none(), "lifting closes it");
         p.pending.clear();
-        // Tap the centre: Rotate View.
-        run(&mut p, vec![touch(2, TouchPhase::Start, l.center), touch(2, TouchPhase::End, l.center)]);
+        // Tap the centre: Rotate View, and no large ring.
+        run(&mut p, vec![touch(2, TouchPhase::Start, l.center)]);
+        assert!(p.big.is_none() && !p.turning, "the centre button doesn't open the large ring");
+        run(&mut p, vec![touch(2, TouchPhase::End, l.center)]);
         assert_eq!(p.mode(), WheelMode::Rotate);
+        assert!(p.pending.is_empty());
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_keyboard_key_asks_for_the_keyboard() {
+        let (mut p, dir) = pad();
+        let at = p.layout.clone().unwrap().keyboard.center();
+        assert!(!p.take_keyboard_tap());
+        let out = run(&mut p, vec![touch(1, TouchPhase::Start, at), touch(1, TouchPhase::End, at)]);
+        assert!(keys(&out).is_empty() && !out.iter().any(|e| matches!(e, Event::Touch { .. })));
+        assert!(p.take_keyboard_tap());
+        assert!(!p.take_keyboard_tap(), "once per tap");
         std::fs::remove_dir_all(dir).ok();
     }
 

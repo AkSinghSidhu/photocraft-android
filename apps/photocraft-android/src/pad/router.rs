@@ -19,6 +19,8 @@ const KEY_H: f32 = 44.0;
 pub const MIN_KEY_H: f32 = 26.0;
 const GAP: f32 = 6.0;
 const WHEEL_GAP: f32 = 12.0;
+/// The on-screen keyboard key at the bottom of the pad.
+const KEYBOARD_H: f32 = 36.0;
 
 /// A part of the pad.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -26,6 +28,8 @@ pub enum Control {
     Key(usize),
     Ring,
     Center,
+    /// The always-present key at the bottom that opens the on-screen keyboard.
+    Keyboard,
     /// The pad's background: touches there do nothing (and don't reach the canvas).
     Panel,
 }
@@ -39,14 +43,19 @@ pub struct Layout {
     pub center: Pos2,
     pub ring_outer: f32,
     pub ring_inner: f32,
+    /// The on-screen keyboard key, at the very bottom.
+    pub keyboard: Rect,
 }
 
 impl Layout {
     /// `count` keys split around the wheel (the extra one of an odd count above it), centred
-    /// vertically in `panel`. Keys are [`KEY_H`] tall where they fit and shrink evenly, down to
-    /// [`MIN_KEY_H`], on a shorter panel.
-    pub fn new(panel: Rect, count: usize) -> Self {
-        let w = (panel.width() - 2.0 * MARGIN).max(1.0);
+    /// vertically in `panel` above the keyboard key at its bottom. Keys are [`KEY_H`] tall where
+    /// they fit and shrink evenly, down to [`MIN_KEY_H`], on a shorter panel.
+    pub fn new(full: Rect, count: usize) -> Self {
+        let w = (full.width() - 2.0 * MARGIN).max(1.0);
+        let keyboard = Rect::from_min_size(pos2(full.left() + MARGIN, full.bottom() - MARGIN - KEYBOARD_H), vec2(w, KEYBOARD_H));
+        // The keys and wheel share what is left above it.
+        let panel = Rect::from_min_max(full.min, pos2(full.right(), (keyboard.top() - GAP).max(full.top())));
         let wheel = w;
         let above = count.div_ceil(2);
         let below = count / 2;
@@ -69,7 +78,7 @@ impl Layout {
             keys.push(Rect::from_min_size(pos2(x, y), vec2(w, key_h)));
             y += key_h + GAP;
         }
-        Self { panel, keys, center, ring_outer: wheel / 2.0, ring_inner: wheel * 0.3 }
+        Self { panel: full, keys, center, ring_outer: wheel / 2.0, ring_inner: wheel * 0.3, keyboard }
     }
 
     /// The keys' height (the same for all).
@@ -80,6 +89,9 @@ impl Layout {
     /// What a touch at `p` (inside the pad) lands on. The wheel takes a little slop around its
     /// edge; keys take half the gap around them.
     pub fn hit(&self, p: Pos2) -> Control {
+        if self.keyboard.expand(GAP / 2.0).contains(p) {
+            return Control::Keyboard;
+        }
         let d = p.distance(self.center);
         if d <= self.ring_inner {
             return Control::Center;
@@ -225,6 +237,8 @@ mod tests {
             assert_eq!(l.hit(k.center()), Control::Key(i));
         }
         assert_eq!(l.hit(pos2(l.panel.center().x, l.panel.top() + 2.0)), Control::Panel);
+        assert_eq!(l.hit(l.keyboard.center()), Control::Keyboard);
+        assert!(l.panel.contains_rect(l.keyboard) && l.keyboard.bottom() > l.panel.bottom() - 10.0, "at the very bottom");
     }
 
     #[test]
@@ -238,6 +252,7 @@ mod tests {
             for k in &l.keys {
                 assert!(l.panel.contains_rect(*k), "{count} keys: {k:?}");
             }
+            assert!(l.keys.iter().all(|k| k.bottom() < l.keyboard.top()), "{count} keys: above the keyboard key");
             for pair in l.keys.windows(2) {
                 assert!(pair[0].bottom() <= pair[1].top(), "keys don't overlap");
             }
