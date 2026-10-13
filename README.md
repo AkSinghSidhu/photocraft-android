@@ -8,7 +8,7 @@
 
 **[⬇ Download Page](https://github.com/morte2437/photocraft-android/releases/latest)**
 
-**[⬇ Direct APK download link](https://github.com/morte2437/photocraft-android/releases/download/android-v0.8.1/photocraft-0.8.1-arm64-v8a.apk)**
+**[⬇ Direct APK download link](https://github.com/morte2437/photocraft-android/releases/download/android-v0.8.2/photocraft-0.8.2-arm64-v8a.apk)**
 
 A prototype for arm64 Android tablets (Android 8.0 or newer), signed with a debug key for
 sideloading. 
