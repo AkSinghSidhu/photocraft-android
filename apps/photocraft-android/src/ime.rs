@@ -42,9 +42,46 @@ pub fn events(edit: &Edit) -> Vec<egui::Event> {
     out
 }
 
+/// The egui events for an edit typed with no text field focused (the Shortcut Pad's keyboard
+/// key opened the keyboard): each character is also pressed as its key, so the on-screen
+/// keyboard's letters reach the app's shortcuts ("B" picks the brush; with the pad's Ctrl key
+/// held, "S" saves).
+pub fn key_events(edit: &Edit) -> Vec<egui::Event> {
+    let tap = |key: egui::Key| {
+        [true, false].map(|pressed| egui::Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: egui::Modifiers::NONE })
+    };
+    let mut out: Vec<egui::Event> = std::iter::repeat_n(egui::Key::Backspace, edit.backspaces).flat_map(tap).collect();
+    for c in edit.insert.chars() {
+        if let Some(key) = egui::Key::from_name(&c.to_uppercase().to_string()) {
+            out.extend(tap(key));
+        }
+    }
+    if !edit.insert.is_empty() {
+        out.push(egui::Event::Text(edit.insert.clone()));
+    }
+    if edit.enter {
+        out.extend(tap(egui::Key::Enter));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unfocused_typing_presses_keys() {
+        let ev = key_events(&diff("", "b1"));
+        let keys: Vec<(egui::Key, bool)> = ev
+            .iter()
+            .filter_map(|e| match e {
+                egui::Event::Key { key, pressed, .. } => Some((*key, *pressed)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(keys, vec![(egui::Key::B, true), (egui::Key::B, false), (egui::Key::Num1, true), (egui::Key::Num1, false)]);
+        assert!(matches!(ev.last(), Some(egui::Event::Text(t)) if t == "b1"));
+    }
 
     #[test]
     fn typing_appends() {

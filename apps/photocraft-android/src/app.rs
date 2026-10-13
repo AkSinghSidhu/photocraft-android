@@ -83,7 +83,16 @@ fn run(android: AndroidApp) -> Result<(), String> {
                     app.set_wgpu(rs);
                 }
             }
-            Ok(Box::new(Shell { app, android, ime: String::new(), editing: false, keys: Default::default(), pad }))
+            Ok(Box::new(Shell {
+                app,
+                android,
+                bridge: bridge.clone(),
+                ime: String::new(),
+                editing: false,
+                soft_keyboard: false,
+                keys: Default::default(),
+                pad,
+            }))
         }),
     )
     .map_err(|e| e.to_string())
@@ -94,14 +103,28 @@ fn run(android: AndroidApp) -> Result<(), String> {
 struct Shell {
     app: PhotocraftApp,
     android: AndroidApp,
+    bridge: Arc<Bridge>,
     /// The keyboard's text as last seen.
     ime: String,
     /// A text field had focus last frame.
     editing: bool,
+    /// The Shortcut Pad's keyboard key opened the on-screen keyboard (it stays open, typing
+    /// shortcuts, until the key is tapped again).
+    soft_keyboard: bool,
     /// Hardware keyboard modifiers (see [`crate::keys`]).
     keys: crate::keys::Held,
     /// The Shortcut Pad (see [`crate::pad`]).
     pad: crate::pad::Pad,
+}
+
+impl Shell {
+    /// Set the keyboard up for a text field or for shortcuts (`flags` on top of plain text) and
+    /// empty its buffer.
+    fn reset_keyboard(&mut self, flags: InputType) {
+        self.android.set_ime_editor_info(InputType::TYPE_CLASS_TEXT | flags, TextInputAction::None, ImeOptions::IME_FLAG_NO_FULLSCREEN);
+        self.android.set_text_input_state(TextInputState { text: String::new(), selection: TextSpan { start: 0, end: 0 }, compose_region: None });
+        self.ime.clear();
+    }
 }
 
 impl eframe::App for Shell {
@@ -111,31 +134,56 @@ impl eframe::App for Shell {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        if self.pad.take_keyboard_tap() {
+            self.soft_keyboard = !self.soft_keyboard;
+            if self.soft_keyboard {
+                self.bridge.take_keyboard_hidden();
+                if !self.editing {
+                    self.reset_keyboard(InputType::TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType::TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+                }
+                // Explicitly (not "implicit"), so Android shows it with no text view focused.
+                self.android.show_soft_input(false);
+            } else {
+                self.android.hide_soft_input(false);
+            }
+            self.pad.keyboard_on = self.soft_keyboard;
+        }
+        if self.soft_keyboard && self.bridge.take_keyboard_hidden() {
+            // Put away with its own hide key or Back (it covers the pad's key while open).
+            self.soft_keyboard = false;
+            self.pad.keyboard_on = false;
+        }
         let editing = ctx.egui_wants_keyboard_input();
         if editing && !self.editing {
             // A field just gained focus. Multi-line, so the keyboard's Enter key types a newline
             // into the text state (an editor action would be dropped by winit), which
             // `ime::diff` turns into Enter.
-            self.android.set_ime_editor_info(
-                InputType::TYPE_CLASS_TEXT | InputType::TYPE_TEXT_FLAG_MULTI_LINE,
-                TextInputAction::None,
-                ImeOptions::IME_FLAG_NO_FULLSCREEN,
-            );
-            // Start the keyboard from an empty buffer.
-            self.android.set_text_input_state(TextInputState { text: String::new(), selection: TextSpan { start: 0, end: 0 }, compose_region: None });
-            self.ime.clear();
+            self.reset_keyboard(InputType::TYPE_TEXT_FLAG_MULTI_LINE);
         }
         if !editing && self.editing {
-            // Focus left the field (Enter, a click elsewhere): put the keyboard away, which
-            // winit doesn't, so it stops covering the dialog's buttons.
-            self.android.hide_soft_input(false);
+            if self.soft_keyboard {
+                // Back to typing shortcuts.
+                self.reset_keyboard(InputType::TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType::TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+            } else {
+                // Focus left the field (Enter, a click elsewhere): put the keyboard away, which
+                // winit doesn't, so it stops covering the dialog's buttons.
+                self.android.hide_soft_input(false);
+            }
         }
         self.editing = editing;
-        if editing {
+        if editing || self.soft_keyboard {
             let now = self.android.text_input_state().text;
             if now != self.ime {
-                raw_input.events.extend(crate::ime::events(&crate::ime::diff(&self.ime, &now)));
-                self.ime = now;
+                let edit = crate::ime::diff(&self.ime, &now);
+                if editing {
+                    raw_input.events.extend(crate::ime::events(&edit));
+                    self.ime = now;
+                } else {
+                    // No field to type into: the letters are shortcuts. Each is handled once,
+                    // from an empty buffer again (no suggestions, so nothing is composing).
+                    raw_input.events.extend(crate::ime::key_events(&edit));
+                    self.reset_keyboard(InputType::TYPE_TEXT_FLAG_NO_SUGGESTIONS | InputType::TYPE_TEXT_VARIATION_VISIBLE_PASSWORD);
+                }
             }
             // GameActivity's text events don't wake the UI (winit drops them): poll while typing.
             ctx.request_repaint_after(std::time::Duration::from_millis(50));

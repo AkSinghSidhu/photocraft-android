@@ -124,6 +124,19 @@ public class PhotoCraftActivity extends GameActivity {
         moveTaskToBack(true);
     }
 
+    /** The keyboard was put away: tell the Shortcut Pad (its keyboard key goes dark). */
+    @Override
+    public void onSoftwareKeyboardVisibilityChanged(boolean visible) {
+        super.onSoftwareKeyboardVisibilityChanged(visible);
+        if (!visible && bridge != null) {
+            try {
+                new File(bridge, "keyboard-hidden").createNewFile();
+            } catch (java.io.IOException e) {
+                Log.w(TAG, "keyboard-hidden", e);
+            }
+        }
+    }
+
     /**
      * Once the Activity is finished, end the process, after saves still being copied back to
      * their documents. Two reasons: winit's event loop can't be created twice in one process, so
