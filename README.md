@@ -35,6 +35,8 @@ the `android-port` branch; `main` mirrors the original project.
 
 ---
 
+** Please also check out Bearinmind's LightCraft android port! https://github.com/artcraft-android/lightcraft-android **
+
 *The original PhotoCraft README follows.*
 
 <p align="center">
