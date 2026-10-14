@@ -39,7 +39,7 @@ the `android-port` branch; `main` mirrors the original project.
 
 **Please also check out [LightCraft for Android](https://github.com/artcraft-android/lightcraft-android)!**<br>
 An Android port of [LightCraft](https://github.com/storytold/lightcraft) (photo library and raw
-development), by [@bearinmindcat](https://github.com/bearinmindcat).
+development), by [ArtCraft-android](https://github.com/artcraft-android).
 
 <br clear="left">
 
