@@ -70,6 +70,7 @@ public class PhotoCraftActivity extends GameActivity {
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private File bridge;
+    private Updater updater;
     /** The picker request being answered (-1: none), kept across Activity recreation. */
     private long pendingId = -1;
     private String pendingName = "";
@@ -82,6 +83,7 @@ public class PhotoCraftActivity extends GameActivity {
                 checkRequest();
                 checkSync();
                 checkQuit();
+                checkUpdateRequest();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
             }
@@ -93,6 +95,11 @@ public class PhotoCraftActivity extends GameActivity {
     protected void onCreate(Bundle state) {
         super.onCreate(state);
         bridge = new File(getFilesDir(), "bridge");
+        updater = new Updater(this);
+        if (state == null && updater.checkAtStartup()) {
+            // A moment after launch, so the first frames aren't competing with it.
+            handler.postDelayed(() -> updater.check(false), 4000);
+        }
         if (state != null) {
             pendingId = state.getLong("pendingId", -1);
             pendingName = state.getString("pendingName", "");
@@ -107,6 +114,7 @@ public class PhotoCraftActivity extends GameActivity {
         hideSystemBars();
         handler.removeCallbacks(poll);
         handler.post(poll);
+        updater.resumePendingInstall();
     }
 
     @Override
@@ -395,6 +403,14 @@ public class PhotoCraftActivity extends GameActivity {
         f.delete();
         checkSync();
         finish();
+    }
+
+    /** Help › Check for Updates… (bridge `check-update`). */
+    private void checkUpdateRequest() {
+        File f = new File(bridge, "check-update");
+        if (f.exists() && f.delete()) {
+            updater.check(true);
+        }
     }
 
     // ---- Writing back ----------------------------------------------------------------------
