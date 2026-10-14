@@ -5,8 +5,11 @@
 #
 #   apps/photocraft-android/build.sh            # release APK
 #   PROFILE=dev apps/photocraft-android/build.sh  # unoptimised library, faster to build
+#   RELEASE_BUILD=3 apps/photocraft-android/build.sh  # the 3rd Android release of this version
 #
-# The APK lands in target/android/photocraft-<version>-arm64-v8a.apk.
+# The APK lands in target/android/photocraft-<version>[-<build>]-arm64-v8a.apk. A release of it
+# is tagged android-v<version>[-<build>] with the APK attached: installed copies offer to update
+# to it (android/app/src/main/java/.../Updater.java).
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,6 +42,7 @@ cd "$HERE/android"
 if [[ "${OS:-}" == "Windows_NT" ]]; then ./gradlew.bat --no-daemon assembleRelease; else ./gradlew --no-daemon assembleRelease; fi
 
 VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
+if [[ "${RELEASE_BUILD:-0}" != 0 ]]; then VERSION="$VERSION-$RELEASE_BUILD"; fi
 OUT="${CARGO_TARGET_DIR:-$ROOT/target}/android"
 mkdir -p "$OUT"
 cp app/build/outputs/apk/release/app-release.apk "$OUT/photocraft-$VERSION-arm64-v8a.apk"

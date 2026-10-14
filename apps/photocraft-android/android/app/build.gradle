@@ -11,11 +11,14 @@ def copyIcon = tasks.register('copyLauncherIcon', Copy) {
     rename { 'ic_launcher.png' }
 }
 
-// The app version is the workspace's (Cargo.toml), so the APK never lags behind the engine.
-// versionCode must grow with every release Android should accept as an update: 0.8.1 → 801.
+// The app version is the workspace's (Cargo.toml), so the APK never lags behind the engine, plus
+// the Android build number (RELEASE_BUILD, from build.sh) for repeat releases of one version:
+// 0.8.2 build 3 is "0.8.2-3", released as android-v0.8.2-3 (the updater compares these).
+// versionCode must grow with every release Android should accept as an update: 0.8.2-3 → 80203.
 def cargoVersion = (rootProject.file('../../../Cargo.toml').text =~ /(?m)^version = "(\d+)\.(\d+)\.(\d+)"/)[0]
-def appVersionName = "${cargoVersion[1]}.${cargoVersion[2]}.${cargoVersion[3]}"
-def appVersionCode = cargoVersion[1].toInteger() * 10000 + cargoVersion[2].toInteger() * 100 + cargoVersion[3].toInteger()
+def releaseBuild = (System.getenv('RELEASE_BUILD') ?: '0').toInteger()
+def appVersionName = "${cargoVersion[1]}.${cargoVersion[2]}.${cargoVersion[3]}" + (releaseBuild > 0 ? "-${releaseBuild}" : '')
+def appVersionCode = (cargoVersion[1].toInteger() * 10000 + cargoVersion[2].toInteger() * 100 + cargoVersion[3].toInteger()) * 100 + Math.min(releaseBuild, 99)
 
 android {
     namespace 'ai.storyteller.photocraft'

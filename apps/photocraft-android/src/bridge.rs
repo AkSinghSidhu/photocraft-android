@@ -15,6 +15,8 @@
 //!   created twice in one process, so the next launch must start a new one.
 //! - `incoming/`: documents another app sent (View / Share intents), copied in by the Activity
 //!   and opened by the app.
+//! - `check-update`: look for a newer release now (Help › Check for Updates…; see `updates.rs`).
+//! - `keyboard-hidden`: left by the Activity when the on-screen keyboard is put away.
 //!
 //! Each side writes a file under a temporary name and renames it, so the other side never reads
 //! a partial one.
@@ -65,7 +67,7 @@ impl Bridge {
         for dir in ["inbox", "out", "sync", "incoming"] {
             std::fs::create_dir_all(root.join(dir))?;
         }
-        for stale in ["request.json", "answer.json", "quit", "keyboard-hidden"] {
+        for stale in ["request.json", "answer.json", "quit", "keyboard-hidden", "check-update"] {
             let _ = std::fs::remove_file(root.join(stale));
         }
         // Ids only need to be unique within a run; start from the clock so a late answer from
@@ -112,6 +114,11 @@ impl Bridge {
     /// `keyboard-hidden` marker; winit drops the event).
     pub fn take_keyboard_hidden(&self) -> bool {
         std::fs::remove_file(self.root.join("keyboard-hidden")).is_ok()
+    }
+
+    /// Ask the Activity to look for an update now (Help › Check for Updates…).
+    pub fn request_update_check(&self) -> Result<(), String> {
+        write_then_rename(&self.root.join("check-update"), b"")
     }
 
     /// Ask the Activity to finish (see the module docs).

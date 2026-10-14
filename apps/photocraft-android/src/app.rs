@@ -49,9 +49,10 @@ fn run(android: AndroidApp) -> Result<(), String> {
             let inbox: photocraft_ui_egui::Inbox = Arc::default();
             let mut services = crate::services::services(bridge.clone(), &files_dir);
             services.inbox = Some(inbox.clone());
-            // The Shortcut Pad (Window › Shortcut Pad): its menu rows go to the app's menus.
+            // The Shortcut Pad (Window › Shortcut Pad) and updates (Help › Check for Updates…):
+            // their menu rows go to the app's menus.
             let pad = crate::pad::Pad::new(&files_dir);
-            services.platform_menu = Some(pad.menu());
+            services.platform_menu = Some(crate::updates::combine(vec![pad.menu(), crate::updates::menu(&files_dir, bridge.clone())]));
             crate::services::watch_incoming(bridge.clone(), inbox, cc.egui_ctx.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.background_jobs = true;
