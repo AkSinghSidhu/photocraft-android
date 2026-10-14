@@ -105,6 +105,30 @@ hardware keyboard; wheel steps run app commands (`view.zoomIn`, `view.rotateView
 `tools.increaseBrushSize`, `edit.undo`, …). The Window menu rows come through a small hook in
 `photocraft-ui-egui` (`platform_menu.rs`, `Services::platform_menu`).
 
+## Updates
+
+The app updates itself from this fork's GitHub releases (`Updater.java`). At launch (Help ›
+Check for Updates at Startup, on by default) and from Help › Check for Updates…, it reads the
+release list (pre-releases included) and takes the newest release tagged
+`android-v<version>[-<build>]` with an APK attached. When that is newer than the installed
+version (`0.8.2-3` beats `0.8.2-2` and `0.8.2`), a dialog shows the release notes' "New in this
+build" section and offers **Install**, **Later** or **Skip This Version** (a skipped version is
+offered again only by Help › Check for Updates…). Install downloads the APK and hands it to
+Android's package installer. The first time, Android asks to allow PhotoCraft to install apps;
+the install carries on when you come back.
+
+Publishing an update: build with the next build number, then tag and attach the APK.
+
+```bash
+RELEASE_BUILD=4 apps/photocraft-android/build.sh          # photocraft-0.8.2-4-arm64-v8a.apk
+gh release create android-v0.8.2-4 --prerelease --notes-file notes.md target/android/photocraft-0.8.2-4-arm64-v8a.apk
+```
+
+The build number goes into the version code (0.8.2-4 → 80204), so each release installs over
+the last. Reset it to 1 when the workspace version changes. Android installs an update only when
+it is signed with the same key as the installed copy: build every release with the same
+keystore (here the build machine's debug key, `~/.android/debug.keystore`; keep a backup).
+
 ## Build
 
 Requirements: Rust (see `rust-version` in the workspace `Cargo.toml`) with
