@@ -1,24 +1,22 @@
-# PhotoCraft for Android (unofficial port)
+# PhotoCraft for Android
+### A desktop-class image editor, rebuilt for drawing tablets.
 
-> [!IMPORTANT]
-> This is an **unofficial, community fork** of [PhotoCraft](https://github.com/storytold/photocraft)
-> that runs it on **Android tablets**. It is not made, endorsed or supported by the PhotoCraft
-> developers or ArtCraft. For the official desktop and web app, go to
-> [storytold/photocraft](https://github.com/storytold/photocraft).
+[![Download APK](https://img.shields.io/badge/Download-APK%200.8.2--4-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/morte2437/photocraft-android/releases/download/android-v0.8.2-4/photocraft-0.8.2-4-arm64-v8a.apk)
+![Android 8+](https://img.shields.io/badge/Android-8.0%2B-555?style=for-the-badge)
+![Free & open source](https://img.shields.io/badge/Free-Open%20source-555?style=for-the-badge)
 
-**[⬇ Download Page](https://github.com/morte2437/photocraft-android/releases/latest)**
+<sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets · a prototype, signed with a debug key for sideloading</sub>
 
-**[⬇ Direct APK download link](https://github.com/morte2437/photocraft-android/releases/download/android-v0.8.2-4/photocraft-0.8.2-4-arm64-v8a.apk)**
+<img src="docs/images/android-shortcut-pad-zoom.gif" width="640" alt="Spinning the Shortcut Pad wheel zooms smoothly into The Great Wave off Kanagawa">
 
-A prototype for arm64 Android tablets (Android 8.0 or newer), signed with a debug key for
-sideloading. 
+| 🎛️ **Shortcut Pad** | ✒️ **Real pen support** | ⌨️ **Keyboards that work** |
+|---|---|---|
+| ExpressKeys-style touch keys and a spin wheel for zoom, rotate, brush size and undo. Hold Alt while you draw. | Pressure, tilt and the eraser end on Wacom EMR, S Pen and USI pens. | Ctrl, Alt and Shift shortcuts on hardware keyboards, plus an on-screen keyboard key for shortcuts without one. |
+| 📂 **Real PSD files** | 🔄 **Updates itself** | 🖥️ **The full engine** |
+| Open, edit and save layered PSDs from any folder or app, through Android's file picker or Share. | New builds are offered inside the app. One tap to install. | Same layers, masks, adjustments, brushes and type as the desktop app, running on your tablet's GPU. |
 
-
-**Includes Wacom style hot keys. More mobile features to come soon!**
-
-<img src="https://raw.githubusercontent.com/morte2437/photocraft-android/android-port/docs/images/android-shortcut-pad-closeup.png" alt="The Shortcut Pad: Undo and Redo keys, the wheel set to Zoom, Alt and Pan keys" width="210">
-
-<img src="docs/images/android-shortcut-pad-zoom.gif" alt="Pressing the Shortcut Pad wheel opens a large ring; spinning it zooms smoothly into The Great Wave off Kanagawa from 84% to 391%" width="640">
+> [!NOTE]
+> Unofficial community port of [PhotoCraft](https://github.com/storytold/photocraft); not made or supported by its developers or ArtCraft.
 
 What the port adds:
 
