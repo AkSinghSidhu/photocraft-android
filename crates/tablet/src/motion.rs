@@ -39,6 +39,41 @@ pub mod tool {
     pub const ERASER: i32 = 4;
 }
 
+/// Which tool each pointer on the screen is, by Android pointer id (winit's touch id), so the
+/// app can tell a finger from a pen or a mouse. Android reuses a pointer's id once it lifts: the
+/// latest touch-down wins. A pointer never reported counts as a finger (the old behaviour).
+#[derive(Clone, Debug, Default)]
+pub struct Pointers {
+    tools: Vec<(u64, i32)>,
+}
+
+impl Pointers {
+    /// Pointers remembered at most (ten fingers and a pen, with room to spare).
+    const MAX: usize = 32;
+
+    pub const fn new() -> Self {
+        Self { tools: Vec::new() }
+    }
+
+    /// A pointer went down with this tool.
+    pub fn down(&mut self, id: u64, tool: i32) {
+        self.tools.retain(|(i, _)| *i != id);
+        if self.tools.len() >= Self::MAX {
+            self.tools.remove(0);
+        }
+        self.tools.push((id, tool));
+    }
+
+    pub fn tool(&self, id: u64) -> Option<i32> {
+        self.tools.iter().find(|(i, _)| *i == id).map(|(_, t)| *t)
+    }
+
+    /// A finger (or a pointer of unknown kind), as opposed to a pen, eraser or mouse.
+    pub fn is_finger(&self, id: u64) -> bool {
+        matches!(self.tool(id), None | Some(tool::FINGER) | Some(tool::UNKNOWN))
+    }
+}
+
 /// One pointer of one `MotionEvent`, as the Activity read it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct RawEvent {
@@ -91,6 +126,22 @@ pub fn tilt_xy(tilt: f32, orientation: f32) -> (f32, f32) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pointers_remember_their_tool() {
+        let mut p = Pointers::default();
+        assert!(p.is_finger(7), "unknown pointers count as fingers");
+        p.down(0, tool::FINGER);
+        p.down(1, tool::STYLUS);
+        p.down(2, tool::MOUSE);
+        assert!(p.is_finger(0) && !p.is_finger(1) && !p.is_finger(2));
+        p.down(1, tool::FINGER);
+        assert!(p.is_finger(1), "a reused id takes the new tool");
+        for i in 0..100 {
+            p.down(i, tool::ERASER);
+        }
+        assert!(!p.is_finger(99) && p.tools.len() <= Pointers::MAX, "bounded");
+    }
     use std::f32::consts::{FRAC_PI_2, FRAC_PI_4, PI};
 
     fn pen(action: i32, pressure: f32) -> RawEvent {
