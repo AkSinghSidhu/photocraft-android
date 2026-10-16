@@ -175,6 +175,24 @@ fn tap_row(ui: &mut egui::Ui, tk: &Tokens, name: &str, salt: &str, shortcut: &mu
     ui.end_row();
 }
 
+/// The tallest widget treated as a list row (taller ones, such as a curves graph, keep their
+/// own vertical drags).
+const LIST_ROW_MAX_HEIGHT: f32 = 120.0;
+
+/// Whether `p` is on a list row inside a scrolling list, as laid out last frame: a widget that
+/// can be both clicked and dragged (a Brushes or Layers row that reorders, a preset swatch, a
+/// slider) on top of a larger drag-only area containing it (a scroll area's content). A finger
+/// swiping up or down there scrolls the list instead of dragging the row.
+pub fn list_item(ctx: &egui::Context, p: egui::Pos2) -> bool {
+    let Some(layer) = ctx.layer_id_at(p) else { return false };
+    ctx.viewport(|vp| {
+        let hits: Vec<&egui::WidgetRect> = vp.prev_pass.widgets.get_layer(layer).filter(|w| w.enabled && w.interact_rect.contains(p)).collect();
+        let Some(row) = hits.iter().rev().find(|w| w.sense.senses_click() && w.sense.senses_drag()) else { return false };
+        row.rect.height() <= LIST_ROW_MAX_HEIGHT
+            && hits.iter().any(|w| w.sense.senses_drag() && !w.sense.senses_click() && w.rect.height() > row.rect.height() * 1.5)
+    })
+}
+
 /// The view after a gesture: `m` applied to `xf` (the active canvas mapping). Returns the new
 /// zoom factor relative to now, rotation and centre, keeping the document point under `m.from`
 /// under `m.to`.

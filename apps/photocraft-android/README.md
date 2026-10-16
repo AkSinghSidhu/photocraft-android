@@ -118,8 +118,9 @@ Multi-touch gestures, set up in **Window › Touch Input** (finger mode, palm re
 | One finger on the canvas | Draws and clicks like the pen | Move the canvas, or nothing (gestures only) |
 | Fingers while the pen is on or near the screen | Ignored (palm rejection); a pen touching down drops resting fingers | Off |
 | Two fingers over menus, panels and lists | Scroll them | Off |
+| One finger on a list row (Brushes, Layers, presets) | Swiping up or down scrolls the list; hold still for a moment, then drag, to reorder; a sideways drag moves a slider | |
 
-A flicked menu or list keeps gliding. A lone finger waits a tenth of a second (or until it moves)
+A flicked menu or list keeps gliding, whether it scrolls itself or a swipe scrolls it. A lone finger waits a tenth of a second (or until it moves)
 before it becomes the pointer, so a second finger landing with it starts a gesture instead of a
 stroke or a click.
 
