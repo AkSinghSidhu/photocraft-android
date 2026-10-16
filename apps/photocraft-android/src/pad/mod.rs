@@ -26,7 +26,7 @@ use photocraft_ui_egui::PhotocraftApp;
 use photocraft_ui_egui::menus::MenuItem;
 use photocraft_ui_egui::platform_menu::PlatformMenu;
 use photocraft_ui_egui::theme::Tokens;
-use router::{Control, Layout, PadTouch, Routed, Router};
+use router::{Control, Env, Layout, PadTouch, Routed, Router, ViewMove};
 use serde_json::Value;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -86,6 +86,8 @@ pub struct Pad {
     /// Brush size and hardness as the turn has set them, unrounded, so slow turns add up.
     size_target: Option<f32>,
     hardness_target: Option<f32>,
+    /// Canvas gestures to apply to the view (Touch Input).
+    views: Vec<ViewMove>,
 }
 
 /// The large ring: where it is and how big.
@@ -132,6 +134,7 @@ impl Pad {
             screen: egui::Rect::NOTHING,
             size_target: None,
             hardness_target: None,
+            views: Vec::new(),
         }
     }
 
@@ -188,14 +191,15 @@ impl Pad {
     }
 
     /// Route a frame's input (from `raw_input_hook`, before modifiers are applied): pad touches
-    /// become key presses and wheel commands, the rest reaches the app.
-    pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+    /// become key presses and wheel commands, canvas gestures move the view and taps press their
+    /// shortcut (Touch Input), the rest reaches the app.
+    pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, env: &Env) {
         let shown = self.shared.borrow().config.enabled;
         let layout = if shown { self.layout.clone() } else { None };
         // A window or menu drawn over the pad last frame (the settings window, a menu dropping
         // down) keeps the touches there.
         let covered = |p: egui::Pos2| ctx.layer_id_at(p).is_some_and(|l| l.order != egui::Order::Background);
-        let routed = self.router.route(std::mem::take(&mut raw.events), layout.as_ref(), covered);
+        let routed = self.router.route(std::mem::take(&mut raw.events), layout.as_ref(), covered, env);
         let mut out = Vec::with_capacity(routed.len());
         if layout.is_none() {
             self.release_all(&mut out);
@@ -204,7 +208,26 @@ impl Pad {
             match r {
                 Routed::App(e) => out.push(e),
                 Routed::Pad(t) => self.touch(t, &mut out),
+                Routed::View(m) => self.views.push(m),
+                Routed::Tap(fingers) => {
+                    let shortcut = match fingers {
+                        2 => &env.config.two_finger_tap,
+                        3 => &env.config.three_finger_tap,
+                        _ => continue,
+                    };
+                    match config::parse(shortcut) {
+                        Ok(chord) if !chord.is_empty() => {
+                            out.extend(press(chord));
+                            out.extend(release(chord));
+                        }
+                        Ok(_) => {}
+                        Err(e) => log::warn!("{fingers}-finger tap: {e}"),
+                    }
+                }
             }
+        }
+        if self.router.wants_frames() {
+            ctx.request_repaint();
         }
         raw.events = out;
     }
@@ -287,6 +310,11 @@ impl Pad {
     /// Apply the wheel's changes (from `logic`, before the app's). A frame's movements are
     /// merged: one zoom, one rotation, one brush change, however many touch events came in.
     pub fn run_pending(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
+        let views = std::mem::take(&mut self.views);
+        if !views.is_empty() {
+            crate::touch::apply(app, &views);
+            ctx.request_repaint();
+        }
         let actions = std::mem::take(&mut self.pending);
         if actions.is_empty() {
             return;
@@ -615,7 +643,9 @@ mod tests {
 
     fn run(p: &mut Pad, events: Vec<Event>) -> Vec<Event> {
         let mut raw = egui::RawInput { events, ..Default::default() };
-        p.input(&egui::Context::default(), &mut raw);
+        let config = crate::touch::config::TouchConfig::default();
+        let env = Env { canvas: None, is_finger: &|_| true, pen_near: false, config: &config, now: 0.0 };
+        p.input(&egui::Context::default(), &mut raw, &env);
         raw.events
     }
 
