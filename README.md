@@ -1,5 +1,5 @@
 # PhotoCraft for Android
-### A desktop-class image editor, rebuilt for drawing on Android tablets.
+### A desktop-class image editor, rebuilt for Android tablets.
 
 [![Download APK](https://img.shields.io/badge/Download-APK%200.9.0-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/morte2437/photocraft-android/releases/download/android-v0.9.0/photocraft-0.9.0-arm64-v8a.apk)
 ![Android 8+](https://img.shields.io/badge/Android-8.0%2B-555?style=for-the-badge)
