@@ -644,7 +644,7 @@ mod tests {
     fn run(p: &mut Pad, events: Vec<Event>) -> Vec<Event> {
         let mut raw = egui::RawInput { events, ..Default::default() };
         let config = crate::touch::config::TouchConfig::default();
-        let env = Env { canvas: None, is_finger: &|_| true, pen_near: false, config: &config, now: 0.0 };
+        let env = Env { canvas: None, is_finger: &|_| true, pen_near: false, config: &config, list_item: &|_| false, now: 0.0 };
         p.input(&egui::Context::default(), &mut raw, &env);
         raw.events
     }
