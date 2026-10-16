@@ -24,6 +24,9 @@ What the port adds:
 - **Pen input:** pressure, tilt and the eraser end of Wacom EMR, S Pen and USI styluses.
 - **Files** through Android's document picker (Open, Save, Save As, Open with, Share).
 - **Keyboards:** hardware shortcuts with Ctrl/Alt/Shift, and typing on the on-screen keyboard.
+- **Touch gestures:** pinch to zoom, twist to rotate, two fingers to pan, two-finger tap to
+  undo and three-finger tap to redo, palm rejection, and smooth flick scrolling in menus
+  (Window › Touch Input).
 - **Shortcut Pad:** 2 to 10 touch keys and a wheel on the screen edge, like a pen tablet's
   ExpressKeys, for working without a keyboard (Window › Shortcut Pad).
 

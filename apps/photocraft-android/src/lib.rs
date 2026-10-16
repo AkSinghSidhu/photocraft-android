@@ -21,6 +21,7 @@ pub mod ime;
 pub mod keys;
 pub mod pad;
 pub mod services;
+pub mod touch;
 pub mod updates;
 
 #[cfg(target_os = "android")]

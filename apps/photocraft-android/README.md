@@ -105,6 +105,31 @@ hardware keyboard; wheel steps run app commands (`view.zoomIn`, `view.rotateView
 `tools.increaseBrushSize`, `edit.undo`, …). The Window menu rows come through a small hook in
 `photocraft-ui-egui` (`platform_menu.rs`, `Services::platform_menu`).
 
+## Touch Input
+
+Multi-touch gestures, set up in **Window › Touch Input** (finger mode, palm rejection) and
+**Touch Input Settings…** (everything, saved in `touch-input.json`):
+
+| Gesture | Default | Options |
+|---|---|---|
+| Two fingers on the canvas | Pan, pinch to zoom and twist to rotate, all at once (the image stays under the fingers) | Each can be turned off |
+| Two-finger tap | Undo (Ctrl+Z) | Any shortcut, a preset or Nothing |
+| Three-finger tap | Redo (Ctrl+Shift+Z) | Any shortcut, a preset or Nothing |
+| One finger on the canvas | Draws and clicks like the pen | Move the canvas, or nothing (gestures only) |
+| Fingers while the pen is on or near the screen | Ignored (palm rejection); a pen touching down drops resting fingers | Off |
+| Two fingers over menus, panels and lists | Scroll them | Off |
+
+A flicked menu or list keeps gliding. A lone finger waits a tenth of a second (or until it moves)
+before it becomes the pointer, so a second finger landing with it starts a gesture instead of a
+stroke or a click.
+
+How it works: the touch router (`src/pad/router.rs`) owns every touch. The Activity reports
+each pointer's tool type as it goes down (`nativePointer`, `photocraft-tablet`'s
+`android.rs`), so fingers are told apart from the pen, eraser and mouse; pens drive the pointer
+at once. Canvas gestures become view moves applied to the active document's camera
+(`src/touch/mod.rs`: zoom, centre and rotation, keeping the document point under the fingers),
+taps press their shortcut like a pad key, and two fingers over the interface become wheel events.
+
 ## Updates
 
 The app updates itself from this fork's GitHub releases (`Updater.java`). At launch (Help ›
@@ -199,7 +224,7 @@ OpenRaster import, export settings, preferences, brush presets.
 | Area | State on Android |
 |---|---|
 | On-screen keyboard | Typing works (see above), but the keyboard covers the lower half of the screen without resizing the UI (including the pad's keyboard key: use the keyboard's own hide key). Shortcuts with modifiers need a hardware keyboard or a pad key holding the modifier. Typing on a Type layer on the canvas is untested. |
-| Touch gestures | Fingers act as a mouse (egui's touch emulation): no pinch-zoom/two-finger pan of the canvas and no palm rejection (a resting palm can click or paint; the pen's pressure/tilt are unaffected by it). Use the zoom/hand tools. |
+| Touch gestures | See [Touch Input](#touch-input). Palm rejection relies on the pen being seen (touching, or hovering on pens that report hover): a palm landing well before the pen comes near counts as a finger until the pen touches down. Gestures were tested on the emulator with injected multi-touch, not yet on real hardware. |
 | Pen hover | Hover moves are not forwarded by winit 0.30: no brush cursor preview while hovering. The eraser end switches tools on contact, not on proximity, so the first eraser-end touch after flipping still uses the previous tool for that stroke. |
 | Barrel rotation | Android has no standard axis for it: rotation stays 0 (Wacom Art Pen rotation is not read). |
 | Pen buttons | Barrel buttons are not mapped to shortcuts. |

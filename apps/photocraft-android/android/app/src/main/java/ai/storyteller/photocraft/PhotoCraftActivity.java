@@ -67,6 +67,10 @@ public class PhotoCraftActivity extends GameActivity {
     /** One pointer of a MotionEvent (photocraft-tablet's android.rs). */
     private static native void nativePen(int action, int tool, int buttons, float pressure, float tilt, float orientation);
 
+    /** A pointer went down: its id and tool type, so Rust tells fingers from pens (touch gestures,
+     * palm rejection; photocraft-tablet's android.rs). */
+    private static native void nativePointer(int id, int tool);
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private File bridge;
@@ -193,6 +197,15 @@ public class PhotoCraftActivity extends GameActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
+        int action = e.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
+            int i = e.getActionIndex();
+            try {
+                nativePointer(e.getPointerId(i), e.getToolType(i));
+            } catch (UnsatisfiedLinkError err) {
+                // The library isn't loaded: every pointer counts as a finger.
+            }
+        }
         forwardPen(e);
         return super.dispatchTouchEvent(e);
     }

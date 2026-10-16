@@ -52,7 +52,8 @@ fn run(android: AndroidApp) -> Result<(), String> {
             // The Shortcut Pad (Window › Shortcut Pad) and updates (Help › Check for Updates…):
             // their menu rows go to the app's menus.
             let pad = crate::pad::Pad::new(&files_dir);
-            services.platform_menu = Some(crate::updates::combine(vec![pad.menu(), crate::updates::menu(&files_dir, bridge.clone())]));
+            let touch = crate::touch::TouchInput::new(&files_dir);
+            services.platform_menu = Some(crate::updates::combine(vec![pad.menu(), touch.menu(), crate::updates::menu(&files_dir, bridge.clone())]));
             crate::services::watch_incoming(bridge.clone(), inbox, cc.egui_ctx.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.background_jobs = true;
@@ -93,6 +94,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 soft_keyboard: false,
                 keys: Default::default(),
                 pad,
+                touch,
             }))
         }),
     )
@@ -116,6 +118,8 @@ struct Shell {
     keys: crate::keys::Held,
     /// The Shortcut Pad (see [`crate::pad`]).
     pad: crate::pad::Pad,
+    /// Touch gestures and their settings (see [`crate::touch`]).
+    touch: crate::touch::TouchInput,
 }
 
 impl Shell {
@@ -191,7 +195,16 @@ impl eframe::App for Shell {
         }
         // The pad's touches become key presses (before the modifiers are worked out from them)
         // and wheel commands; the rest of the input goes on to the app.
-        self.pad.input(ctx, raw_input);
+        let config = self.touch.config();
+        let env = crate::pad::router::Env {
+            // Gestures move the canvas only while a document is open.
+            canvas: self.app.session.active_index().map(|_| self.app.last_canvas_rect),
+            is_finger: &|id: egui::TouchId| photocraft_tablet::android::is_finger(id.0),
+            pen_near: photocraft_tablet::android::pen_seen_within(std::time::Duration::from_millis(300)),
+            config: &config,
+            now: raw_input.time.unwrap_or_else(|| ctx.input(|i| i.time)),
+        };
+        self.pad.input(ctx, raw_input, &env);
         self.keys.apply(raw_input);
         self.app.raw_input_hook(ctx, raw_input);
     }
@@ -202,5 +215,6 @@ impl eframe::App for Shell {
         self.pad.show(ui, &tokens, &self.app);
         self.app.ui(ui, frame);
         self.pad.settings(ui.ctx(), &tokens);
+        self.touch.settings(ui.ctx(), &tokens);
     }
 }
