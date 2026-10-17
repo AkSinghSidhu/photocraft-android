@@ -9,7 +9,7 @@
 
 <sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
 
-<img src="docs/images/android-shortcut-pad-zoom.gif" width="640" alt="Spinning the Shortcut Pad wheel zooms smoothly into The Great Wave off Kanagawa">
+<img src="docs/images/android-touch-gestures.gif" width="720" alt="Pinching, twisting and panning The Great Wave off Kanagawa with two fingers, then zooming and rotating with the Shortcut Pad wheel">
 
 | 🎛️ **Shortcut Pad** | ✒️ **Real pen support** | ⌨️ **Keyboards that work** |
 |---|---|---|
@@ -18,8 +18,6 @@
 | Open, edit and save layered PSDs from any folder or app, through Android's file picker or Share. | New builds are offered inside the app. One tap to install. | Same layers, masks, adjustments, brushes and type as the desktop app, running on your tablet's GPU. |
 | 🤏 **Multi-touch gestures** | 🖐️ **Palm rejection** | 👆 **Touch-friendly lists** |
 | Pinch to zoom, twist to rotate and drag with two fingers to pan, all at once. Two-finger tap undoes, three-finger tap redoes, and each tap can run any shortcut. | Rest your hand on the screen while you draw: fingers are ignored while the pen is on or near it. One finger can draw, move the canvas, or do nothing. | Swipe to scroll menus, brush and layer lists, with momentum. Hold a brush or layer, then drag, to reorder it. |
-
-<img src="docs/images/android-touch-gestures.gif" width="720" alt="Pinching, twisting and panning The Great Wave off Kanagawa with two fingers, then zooming and rotating with the Shortcut Pad wheel">
 
 > [!NOTE]
 > Unofficial community port of [PhotoCraft](https://github.com/storytold/photocraft); not made or supported by its developers or ArtCraft.
