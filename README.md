@@ -19,6 +19,8 @@
 | 🤏 **Multi-touch gestures** | 🖐️ **Palm rejection** | 👆 **Touch-friendly lists** |
 | Pinch to zoom, twist to rotate and drag with two fingers to pan, all at once. Two-finger tap undoes, three-finger tap redoes, and each tap can run any shortcut. | Rest your hand on the screen while you draw: fingers are ignored while the pen is on or near it. One finger can draw, move the canvas, or do nothing. | Swipe to scroll menus, brush and layer lists, with momentum. Hold a brush or layer, then drag, to reorder it. |
 
+<img src="docs/images/android-touch-gestures.gif" width="720" alt="Pinching, twisting and panning The Great Wave off Kanagawa with two fingers, then zooming and rotating with the Shortcut Pad wheel">
+
 > [!NOTE]
 > Unofficial community port of [PhotoCraft](https://github.com/storytold/photocraft); not made or supported by its developers or ArtCraft.
 
