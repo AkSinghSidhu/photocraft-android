@@ -193,12 +193,11 @@ impl Pad {
     /// Route a frame's input (from `raw_input_hook`, before modifiers are applied): pad touches
     /// become key presses and wheel commands, canvas gestures move the view and taps press their
     /// shortcut (Touch Input), the rest reaches the app.
-    pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, env: &Env) {
+    pub fn input(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput, env: &Env, covered: impl Fn(egui::Pos2) -> bool) {
         let shown = self.shared.borrow().config.enabled;
         let layout = if shown { self.layout.clone() } else { None };
         // A window or menu drawn over the pad last frame (the settings window, a menu dropping
         // down) keeps the touches there.
-        let covered = |p: egui::Pos2| ctx.layer_id_at(p).is_some_and(|l| l.order != egui::Order::Background);
         let routed = self.router.route(std::mem::take(&mut raw.events), layout.as_ref(), covered, env);
         let mut out = Vec::with_capacity(routed.len());
         if layout.is_none() {
@@ -645,7 +644,7 @@ mod tests {
         let mut raw = egui::RawInput { events, ..Default::default() };
         let config = crate::touch::config::TouchConfig::default();
         let env = Env { canvas: None, is_finger: &|_| true, pen_near: false, config: &config, list_item: &|_| false, now: 0.0 };
-        p.input(&egui::Context::default(), &mut raw, &env);
+        p.input(&egui::Context::default(), &mut raw, &env, |_| false);
         raw.events
     }
 
