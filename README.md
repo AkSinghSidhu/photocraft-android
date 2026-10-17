@@ -34,6 +34,8 @@ What the port adds:
 - **Shortcut Pad:** 2 to 10 touch keys and a wheel on the screen edge, like a pen tablet's
   ExpressKeys, for working without a keyboard (Window › Shortcut Pad).
 
+Found a bug? [Report it here](https://github.com/morte2437/photocraft-android/issues/new/choose).
+
 Details, build steps and what isn't supported yet:
 [apps/photocraft-android/README.md](apps/photocraft-android/README.md). The Android work lives on
 the `android-port` branch; `main` mirrors the original project.
