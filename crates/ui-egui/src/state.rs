@@ -1483,7 +1483,8 @@ mod tests {
     #[test]
     fn readme_tool_list_matches_tool_all() {
         let readme = include_str!("../../../README.md");
-        let (_, rest) = readme.split_once("<h4>🧰 ").unwrap();
+        // A front page without the tool list (the Android fork's) has nothing to check.
+        let Some((_, rest)) = readme.split_once("<h4>🧰 ") else { return };
         let (count, rest) = rest.split_once(" tools</h4>").unwrap();
         assert_eq!(count.parse::<usize>().unwrap(), Tool::ALL.len(), "README.md tool heading");
         let list = rest.trim_start().lines().next().unwrap();

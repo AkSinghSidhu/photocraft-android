@@ -142,6 +142,8 @@ pub struct Stylus {
     frame: Vec<PenSample>,
     /// The last pen sample of an earlier frame: where this frame's interpolation starts.
     prev: Option<PenSample>,
+    /// Frames in a row without a pen sample (`prev` is forgotten after the stroke's end frame).
+    quiet_frames: u8,
     /// The sample [`Self::select`] interpolated for the pointer move being processed.
     current: Option<PenSample>,
     /// The highest pen pressure (before the curve) since the drag began, for a tap's one dab.
@@ -176,6 +178,7 @@ impl Default for Stylus {
             lifted: false,
             frame: Vec::new(),
             prev: None,
+            quiet_frames: 0,
             current: None,
             peak: 0.0,
             pen_contacts: PenContacts::default(),
@@ -206,6 +209,13 @@ impl Stylus {
             self.prev = Some(*last);
         }
         self.frame = self.feed.drain();
+        // The frame that ends a stroke may carry no sample (the moves came the frame before) while
+        // the feed is already cleared (Android reports the pen hovering the moment it lifts):
+        // `prev` stands in for that one frame, then it is no longer this stroke's.
+        self.quiet_frames = if self.frame.is_empty() { self.quiet_frames.saturating_add(1) } else { 0 };
+        if self.quiet_frames >= 2 {
+            self.prev = None;
+        }
         // A platform that feeds the pen and also reports it as touch force (Android) describes
         // each contact twice; the feed's samples carry tilt, so bare forces would only dilute
         // them when the frame's moves are interpolated.
@@ -270,7 +280,9 @@ impl Stylus {
     /// never the lift's 0.
     fn latest(&self) -> Option<PenSample> {
         let feed = self.feed.get();
-        match self.frame.last() {
+        // This frame's last contact, or (a frame that only lifts the pen) the last one before it.
+        let contact = self.frame.last().or(if self.frame.is_empty() { self.prev.as_ref() } else { None });
+        match contact {
             Some(s) if s.pressure > 0.0 && feed.is_none_or(|f| f.pressure <= 0.0) => Some(*s),
             _ => feed,
         }
@@ -580,6 +592,25 @@ mod tests {
 
     fn pen(pressure: f32) -> PenSample {
         PenSample { pressure, ..Default::default() }
+    }
+
+    /// The pen's last moves land in one frame and its lift in the next, by which time the pen
+    /// already hovers (the feed is cleared): the lift's point keeps the pen's pressure, not a
+    /// mouse's full pressure (a full-size dot where the pen left the screen).
+    #[test]
+    fn a_lift_in_the_frame_after_the_last_move_keeps_the_pens_pressure() {
+        let mut s = Stylus { touch_force: false, ..Default::default() };
+        s.feed.set(Some(pen(0.3)));
+        s.feed.set(Some(pen(0.2)));
+        s.update(&[]);
+        assert!((s.pressure() - 0.2).abs() < 1e-6);
+        // Lifted, then hovering: the feed is cleared before the next frame runs.
+        s.feed.set(None);
+        s.update(&[]);
+        assert!((s.pressure() - 0.2).abs() < 1e-6, "the lift frame: {}", s.pressure());
+        // A frame later the stroke is over: a mouse or finger paints at full pressure again.
+        s.update(&[]);
+        assert_eq!(s.pressure(), 1.0);
     }
 
     #[test]
