@@ -1,0 +1,3 @@
+# This fork keeps its own front page: on merges from upstream PhotoCraft, our README wins
+# (needs once per clone: git config merge.ours.driver true).
+README.md merge=ours
