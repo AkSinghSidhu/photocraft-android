@@ -95,6 +95,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 keys: Default::default(),
                 pad,
                 touch,
+                drawn: Default::default(),
             }))
         }),
     )
@@ -120,6 +121,8 @@ struct Shell {
     pad: crate::pad::Pad,
     /// Touch gestures and their settings (see [`crate::touch`]).
     touch: crate::touch::TouchInput,
+    /// Where the last frame drew everything (see [`crate::touch::Snapshot`]).
+    drawn: crate::touch::Snapshot,
 }
 
 impl Shell {
@@ -202,10 +205,11 @@ impl eframe::App for Shell {
             is_finger: &|id: egui::TouchId| photocraft_tablet::android::is_finger(id.0),
             pen_near: photocraft_tablet::android::pen_seen_within(std::time::Duration::from_millis(300)),
             config: &config,
-            list_item: &|p: egui::Pos2| crate::touch::list_item(ctx, p),
+            list_item: &|p: egui::Pos2| self.drawn.list_item(p),
             now: raw_input.time.unwrap_or_else(|| ctx.input(|i| i.time)),
         };
-        self.pad.input(ctx, raw_input, &env);
+        let drawn = &self.drawn;
+        self.pad.input(ctx, raw_input, &env, |p| drawn.covered(p));
         self.keys.apply(raw_input);
         self.app.raw_input_hook(ctx, raw_input);
     }
@@ -217,5 +221,7 @@ impl eframe::App for Shell {
         self.app.ui(ui, frame);
         self.pad.settings(ui.ctx(), &tokens);
         self.touch.settings(ui.ctx(), &tokens);
+        // What was drawn where, for the next frame's touches (see `touch::Snapshot`).
+        self.drawn = crate::touch::Snapshot::take(ui.ctx());
     }
 }

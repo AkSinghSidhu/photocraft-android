@@ -179,18 +179,90 @@ fn tap_row(ui: &mut egui::Ui, tk: &Tokens, name: &str, salt: &str, shortcut: &mu
 /// own vertical drags).
 const LIST_ROW_MAX_HEIGHT: f32 = 120.0;
 
-/// Whether `p` is on a list row inside a scrolling list, as laid out last frame: a widget that
-/// can be both clicked and dragged (a Brushes or Layers row that reorders, a preset swatch, a
-/// slider) on top of a larger drag-only area containing it (a scroll area's content). A finger
-/// swiping up or down there scrolls the list instead of dragging the row.
-pub fn list_item(ctx: &egui::Context, p: egui::Pos2) -> bool {
-    let Some(layer) = ctx.layer_id_at(p) else { return false };
-    ctx.viewport(|vp| {
-        let hits: Vec<&egui::WidgetRect> = vp.prev_pass.widgets.get_layer(layer).filter(|w| w.enabled && w.interact_rect.contains(p)).collect();
-        let Some(row) = hits.iter().rev().find(|w| w.sense.senses_click() && w.sense.senses_drag()) else { return false };
-        row.rect.height() <= LIST_ROW_MAX_HEIGHT
-            && hits.iter().any(|w| w.sense.senses_drag() && !w.sense.senses_click() && w.rect.height() > row.rect.height() * 1.5)
-    })
+/// One widget as laid out in a frame.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Widget {
+    pub rect: egui::Rect,
+    pub interact: egui::Rect,
+    pub click: bool,
+    pub drag: bool,
+    pub enabled: bool,
+}
+
+/// Where everything was drawn last frame, layer by layer (back to front), for the touch router
+/// to decide what a new touch landed on. Taken at the end of the frame's UI ([`Self::take`]):
+/// between frames, where the router runs, egui's own lookups (`layer_id_at`, the widget rects)
+/// can miss popups such as the brush picker, which would let a touch on the picker count as one
+/// on the canvas behind it.
+#[derive(Clone, Debug, Default)]
+pub struct Snapshot {
+    layers: Vec<(egui::Order, Vec<Widget>)>,
+}
+
+impl Snapshot {
+    pub fn take(ctx: &egui::Context) -> Self {
+        let order: Vec<egui::LayerId> = ctx.memory(|m| m.layer_ids().collect());
+        ctx.viewport(|vp| {
+            let w = &vp.this_pass.widgets;
+            let widgets = |l: egui::LayerId| -> Vec<Widget> {
+                w.get_layer(l)
+                    .map(|w| Widget { rect: w.rect, interact: w.interact_rect, click: w.sense.senses_click(), drag: w.sense.senses_drag(), enabled: w.enabled })
+                    .collect()
+            };
+            let mut layers: Vec<(egui::Order, Vec<Widget>)> = order.iter().map(|l| (l.order, widgets(*l))).collect();
+            // Layers new this frame aren't in the area order yet: on top, by their order.
+            let mut extra: Vec<egui::LayerId> = w.layer_ids().filter(|l| !order.contains(l)).collect();
+            extra.sort_by_key(|l| l.order);
+            layers.extend(extra.into_iter().map(|l| (l.order, widgets(l))));
+            layers.retain(|(_, w)| !w.is_empty());
+            Self { layers }
+        })
+    }
+
+    #[cfg(test)]
+    pub fn from_layers(layers: Vec<(egui::Order, Vec<Widget>)>) -> Self {
+        Self { layers }
+    }
+
+    /// The topmost layer with something drawn at `p`.
+    fn top(&self, p: egui::Pos2) -> Option<&(egui::Order, Vec<Widget>)> {
+        self.layers.iter().rev().find(|(_, w)| w.iter().any(|w| w.rect.contains(p)))
+    }
+
+    /// Whether a window, menu or popup was drawn over `p`: touches there belong to it, not to the
+    /// canvas or the Shortcut Pad.
+    pub fn covered(&self, p: egui::Pos2) -> bool {
+        self.top(p).is_some_and(|(order, _)| *order != egui::Order::Background)
+    }
+
+    /// Whether `p` is on a list row inside a scrolling list: a widget that can be both clicked
+    /// and dragged (a Brushes or Layers row that reorders, a preset card, a slider) on top of a
+    /// larger drag-only area containing it (a scroll area's content). A finger swiping up or down
+    /// there scrolls the list instead of dragging the row.
+    pub fn list_item(&self, p: egui::Pos2) -> bool {
+        let Some((_, widgets)) = self.top(p) else { return false };
+        let hits: Vec<&Widget> = widgets.iter().filter(|w| w.enabled && w.interact.contains(p)).collect();
+        let Some(row) = hits.iter().rev().find(|w| w.click && w.drag) else { return false };
+        if row.rect.height() > LIST_ROW_MAX_HEIGHT {
+            return false;
+        }
+        // A scroll area's drag-only content area under the row, or (a scroll area that registers
+        // none, like the brush picker's) content overflowing a box that shows part of it.
+        let all: Vec<&Widget> = widgets.iter().filter(|w| w.rect.contains(p)).collect();
+        let dragged_area = hits.iter().any(|w| w.drag && !w.click && w.rect.height() > row.rect.height() * 1.5);
+        // Scrolled content overlaps the box showing it and runs past it: neither holds the other
+        // (a parent box holds its children; it does not scroll them).
+        let overflowing = all.iter().any(|content| {
+            content.rect.height() > row.rect.height() * 1.5
+                && all.iter().any(|view| {
+                    view.rect.height() > row.rect.height()
+                        && view.rect.height() < content.rect.height()
+                        && !view.rect.contains_rect(content.rect)
+                        && !content.rect.contains_rect(view.rect)
+                })
+        });
+        dragged_area || overflowing
+    }
 }
 
 /// The view after a gesture: `m` applied to `xf` (the active canvas mapping). Returns the new
@@ -271,6 +343,41 @@ mod tests {
         assert_eq!((zoom, rotation), (1.0, 0.0));
         let m = ViewMove { scale: 1e9, ..m };
         assert_eq!(moved_view(&xf(0.0, false), 1.0, &m).0, 32.0);
+    }
+
+    fn widget(rect: Rect, click: bool, drag: bool) -> Widget {
+        Widget { rect, interact: rect, click, drag, enabled: true }
+    }
+
+    /// The brush picker, a popup over the canvas: touches on it are the picker's, and its preset
+    /// cards (draggable, inside the scrolling list) are list rows; the canvas itself is neither.
+    #[test]
+    fn popups_over_the_canvas_and_their_list_rows_are_found() {
+        let canvas = Rect::from_min_max(pos2(40.0, 68.0), pos2(883.0, 776.0));
+        let list = Rect::from_min_max(pos2(140.0, 250.0), pos2(430.0, 470.0));
+        let card = Rect::from_min_max(pos2(140.0, 400.0), pos2(430.0, 470.0));
+        let slider = Rect::from_min_max(pos2(140.0, 100.0), pos2(430.0, 118.0));
+        let s = Snapshot::from_layers(vec![
+            (egui::Order::Background, vec![widget(Rect::from_min_size(pos2(0.0, 0.0), vec2(1280.0, 800.0)), false, false), widget(canvas, true, true)]),
+            (egui::Order::Foreground, vec![widget(slider, true, true), widget(list, false, true), widget(card, true, true)]),
+        ]);
+        assert!(s.covered(card.center()) && s.list_item(card.center()));
+        assert!(s.covered(slider.center()) && !s.list_item(slider.center()), "a slider outside a list drags");
+        let open_canvas = pos2(700.0, 600.0);
+        assert!(!s.covered(open_canvas) && !s.list_item(open_canvas), "the canvas is too big to be a row");
+        assert!(!Snapshot::default().covered(open_canvas));
+        // A list whose scroll area registers no drag area: its content overflows the popup.
+        let frame = Rect::from_min_max(pos2(130.0, 66.0), pos2(444.0, 506.0));
+        let content = Rect::from_min_max(pos2(137.0, 244.0), pos2(431.0, 2972.0));
+        let s =
+            Snapshot::from_layers(vec![(egui::Order::Foreground, vec![widget(frame, true, false), widget(content, false, false), widget(card, true, true)])]);
+        assert!(s.list_item(card.center()));
+        // The same row in a box that doesn't overflow (an ordinary panel) drags as usual.
+        let panel = Rect::from_min_max(pos2(130.0, 66.0), pos2(444.0, 506.0));
+        let group = Rect::from_min_max(pos2(135.0, 300.0), pos2(440.0, 500.0));
+        let s =
+            Snapshot::from_layers(vec![(egui::Order::Background, vec![widget(panel, false, false), widget(group, false, false), widget(card, true, true)])]);
+        assert!(!s.list_item(card.center()));
     }
 
     #[test]
