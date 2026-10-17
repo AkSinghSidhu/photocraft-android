@@ -5,7 +5,9 @@
 ![Android 8+](https://img.shields.io/badge/Android-8.0%2B-555?style=for-the-badge)
 ![Free & open source](https://img.shields.io/badge/Free-Open%20source-555?style=for-the-badge)
 
-<sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets · a prototype, signed with a debug key for sideloading</sub>
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22ai.storyteller.photocraft%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fmorte2437%2Fphotocraft-android%22%2C%22author%22%3A%22morte2437%22%2C%22name%22%3A%22PhotoCraft%20for%20Android%22%2C%22additionalSettings%22%3A%22%7B%5C%22includePrereleases%5C%22%3A%20true%7D%22%7D"><img src="docs/images/badge-obtainium.png" alt="Get it on Obtainium" height="56"></a>
+
+<sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
 
 <img src="docs/images/android-shortcut-pad-zoom.gif" width="640" alt="Spinning the Shortcut Pad wheel zooms smoothly into The Great Wave off Kanagawa">
 

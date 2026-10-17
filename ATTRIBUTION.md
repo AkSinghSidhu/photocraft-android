@@ -83,6 +83,7 @@ The other built-in ICC profiles and the generated LUT looks are produced by code
 | `docs/images/photocraft-*.jpg` | PhotoCraft screenshots | PhotoCraft contributors (UI) | Rendered offscreen with the `snapshot` example | MIT OR Apache-2.0 (UI); the artwork in each is public domain, listed below |
 | `docs/images/android-shortcut-pad*.png` | PhotoCraft for Android with the Shortcut Pad (a drawn smiley, no artwork) | PhotoCraft contributors | Android Emulator screenshot (`adb exec-out screencap`) | MIT OR Apache-2.0 |
 | `docs/images/android-shortcut-pad-zoom.gif` | PhotoCraft for Android: the Shortcut Pad wheel zooming into *The Great Wave off Kanagawa* (Katsushika Hokusai, c. 1831) | PhotoCraft contributors (UI); artwork public domain, [Wikimedia Commons](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg) | Android Emulator screen recording (`adb shell screenrecord`), converted with ffmpeg | MIT OR Apache-2.0 (UI); artwork public domain |
+| `docs/images/badge-obtainium.png` | "Get it on Obtainium" badge | Imran Remtulla and the Obtainium contributors | [Obtainium](https://github.com/ImranR98/Obtainium) `assets/graphics/badge_obtainium.png` | GPL-3.0 (Obtainium's license); used unmodified as a link badge |
 | `docs/images/preferences-apply-*.png` | Preferences before and after adding Apply (no artwork) | PhotoCraft contributors | PhotoCraft control-channel capture and offscreen `snapshot` example | MIT OR Apache-2.0 |
 
 Artwork shown in the screenshots (all public domain, via Wikimedia Commons; details in
