@@ -36,14 +36,6 @@ the `android-port` branch; `main` mirrors the original project.
 
 ---
 
-<a href="https://github.com/artcraft-android/lightcraft-android"><img src="https://raw.githubusercontent.com/storytold/lightcraft/main/assets/app-icon/hicolor/128x128/apps/ai.storyteller.lightcraft.png" alt="LightCraft logo" width="64" height="64" align="left"></a>
-
-**Please also check out [LightCraft for Android](https://github.com/artcraft-android/lightcraft-android)!**<br>
-An Android port of [LightCraft](https://github.com/storytold/lightcraft) (photo library and raw
-development), by [ArtCraft-android](https://github.com/artcraft-android).
-
-<br clear="left">
-
 ## About PhotoCraft
 
 [PhotoCraft](https://github.com/storytold/photocraft) is an open-source image editor written in
