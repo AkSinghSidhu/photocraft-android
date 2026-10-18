@@ -4737,6 +4737,7 @@ dependencies = [
  "photocraft-format",
  "photocraft-io",
  "photocraft-tablet",
+ "photocraft-text",
  "photocraft-ui-egui",
  "serde",
  "serde_json",
