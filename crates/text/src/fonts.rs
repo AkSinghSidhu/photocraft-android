@@ -762,11 +762,27 @@ mod fontconfig_tests {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+/// Folders the font scan reads besides the platform's ([`add_font_dir`]).
+static EXTRA_FONT_DIRS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Also scan `dir` for fonts (an app's own imported fonts, kept in its private storage). Call
+/// before the scan starts ([`crate::warm_shared`]); fonts added later are registered directly.
+pub fn add_font_dir(dir: std::path::PathBuf) {
+    let mut dirs = EXTRA_FONT_DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !dirs.contains(&dir) {
+        dirs.push(dir);
+    }
+}
+
 pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut v = Vec::new();
-    if cfg!(target_os = "macos") {
+    if cfg!(target_os = "android") {
+        // Android's own fonts (Roboto, the Noto families) and the device maker's.
+        v.push(PathBuf::from("/system/fonts"));
+        v.push(PathBuf::from("/product/fonts"));
+    } else if cfg!(target_os = "macos") {
         v.push(PathBuf::from("/System/Library/Fonts"));
         v.push(PathBuf::from("/Library/Fonts"));
         if let Some(h) = &home {
@@ -793,6 +809,7 @@ pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
             v.push(h.join(".fonts"));
         }
     }
+    v.extend(EXTRA_FONT_DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned());
     v
 }
 

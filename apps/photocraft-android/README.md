@@ -131,6 +131,15 @@ at once. Canvas gestures become view moves applied to the active document's came
 (`src/touch/mod.rs`: zoom, centre and rotation, keeping the document point under the fingers),
 taps press their shortcut like a pad key, and two fingers over the interface become wheel events.
 
+## Fonts
+
+The Type tool lists PhotoCraft's bundled fonts, the tablet's own fonts (`/system/fonts`,
+`/product/fonts`: Roboto, the Noto families and the device maker's), and fonts you import.
+**Type › Import Font…** opens Android's file picker for `.ttf`, `.otf`, `.ttc` or `.otc` files
+(several at once): each is checked, added to the font list straight away, and kept in the app's
+private `fonts` folder, which loads on every start (`src/fonts.rs`). Files that aren't fonts are
+skipped with a message in the status bar.
+
 ## Updates
 
 The app updates itself from this fork's GitHub releases (`Updater.java`). At launch (Help ›
@@ -233,7 +242,7 @@ OpenRaster import, export settings, preferences, brush presets.
 | Clipboard images, screen color picker, display ICC profiles | Not available (no Android services wired). |
 | Crash-recovery autosave | Not wired; save often. |
 | TCP control server / MCP | Not available. |
-| Photoshop settings import, system fonts | Not available; bundled fonts only (build with `CRAFT_FONTS_DIR` to add more). |
+| Photoshop settings import | Not available. |
 | Names from document providers | Some providers (Downloads on some devices) report a saved document's name without its extension, or no name. The app keeps the extension it asked for, so the format is right, but the file in that folder may show without `.psd`. |
 | Choosing a folder | Commands that ask for a folder (such as loading video frames as layers) report that it isn't supported on Android; pick the files themselves. |
 | Saving back to read-only documents | A document whose provider grants no write access is saved to the app's private copy only; a message says to use Save As. |

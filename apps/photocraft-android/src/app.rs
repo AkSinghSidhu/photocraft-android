@@ -47,13 +47,19 @@ fn run(android: AndroidApp) -> Result<(), String> {
         Box::new(move |cc| {
             PhotocraftApp::setup_context(&cc.egui_ctx, ThemeKind::Pro);
             let inbox: photocraft_ui_egui::Inbox = Arc::default();
+            // Fonts imported with Type › Import Font… load with the system's on every start.
+            photocraft_text::fonts::add_font_dir(crate::fonts::fonts_dir(&files_dir));
             let mut services = crate::services::services(bridge.clone(), &files_dir);
             services.inbox = Some(inbox.clone());
             // The Shortcut Pad (Window › Shortcut Pad) and updates (Help › Check for Updates…):
             // their menu rows go to the app's menus.
             let pad = crate::pad::Pad::new(&files_dir);
             let touch = crate::touch::TouchInput::new(&files_dir);
-            services.platform_menu = Some(crate::updates::combine(vec![pad.menu(), touch.menu(), crate::updates::menu(&files_dir, bridge.clone())]));
+            let font_outcome = crate::fonts::Outcome::default();
+            let wake = cc.egui_ctx.clone();
+            let fonts_menu = crate::fonts::menu(&files_dir, bridge.clone(), font_outcome.clone(), move || wake.request_repaint());
+            services.platform_menu =
+                Some(crate::updates::combine(vec![pad.menu(), touch.menu(), fonts_menu, crate::updates::menu(&files_dir, bridge.clone())]));
             crate::services::watch_incoming(bridge.clone(), inbox, cc.egui_ctx.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.background_jobs = true;
@@ -94,6 +100,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 soft_keyboard: false,
                 keys: Default::default(),
                 pad,
+                font_outcome,
                 touch,
                 drawn: Default::default(),
             }))
@@ -119,6 +126,8 @@ struct Shell {
     keys: crate::keys::Held,
     /// The Shortcut Pad (see [`crate::pad`]).
     pad: crate::pad::Pad,
+    /// The last Type › Import Font… result, for the status bar.
+    font_outcome: crate::fonts::Outcome,
     /// Touch gestures and their settings (see [`crate::touch`]).
     touch: crate::touch::TouchInput,
     /// Where the last frame drew everything (see [`crate::touch::Snapshot`]).
@@ -138,6 +147,10 @@ impl Shell {
 impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
         self.pad.run_pending(&mut self.app, ctx);
+        if let Some((message, error)) = self.font_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
+            self.app.ui.status = message;
+            self.app.ui.status_error = error;
+        }
         self.app.logic(ctx, frame);
     }
 
