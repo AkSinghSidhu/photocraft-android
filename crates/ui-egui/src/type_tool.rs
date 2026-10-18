@@ -1484,7 +1484,7 @@ pub(crate) fn family_picker_in(
         let height_id = search_id.with("height");
         // Each opening focuses the search, including a reopen on the very next pass. Keep
         // asking through the invisible sizing pass, until the field receives focus.
-        let mut focus = ui.data(|d| d.get_temp(focus_id)).unwrap_or(true);
+        let mut focus = ui.data(|d| d.get_temp(focus_id)).unwrap_or(crate::AUTO_FOCUS_SEARCH);
         let mut q: String = ui.data(|d| d.get_temp(search_id)).unwrap_or_default();
         // Consume these before TextEdit and the canvas can interpret them as caret movement.
         let down = ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));

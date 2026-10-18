@@ -46,6 +46,11 @@ mod camera_raw_preview_ui;
 mod camera_raw_scope_ui;
 pub mod camera_raw_ui;
 pub mod canvas;
+
+/// Search fields that open with a list (Help › Search, the font picker) take the focus so typing
+/// goes straight in. Not on Android: a focused field raises the on-screen keyboard over the
+/// list every time it opens; there the field is tapped when wanted.
+pub(crate) const AUTO_FOCUS_SEARCH: bool = !cfg!(target_os = "android");
 pub mod canvas_autoscroll;
 mod canvas_popup;
 pub mod canvas_tool_menu;
