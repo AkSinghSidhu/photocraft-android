@@ -28,6 +28,9 @@ if [[ -n "${FEATURES:-}" ]]; then FEATURE_ARGS=(--features "$FEATURES"); fi
 # source paths for panic messages. Map the Cargo home, the workspace and the target directory to
 # neutral prefixes (both spellings on Windows, where rustc sees `C:\...` paths).
 remap() {
+    # Cargo splits RUSTFLAGS on spaces, so a remap of a path containing one (e.g. a user's
+    # "Documents) would arrive at rustc as two broken arguments; skip it to keep the build working.
+    if [[ "$1" == *" "* ]] || [[ "$2" == *" "* ]]; then return 0; fi
     printf ' --remap-path-prefix=%s=%s' "$1" "$2"
     if command -v cygpath >/dev/null; then printf ' --remap-path-prefix=%s=%s' "$(cygpath -w "$1")" "$2"; fi
 }
