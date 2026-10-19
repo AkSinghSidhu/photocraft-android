@@ -1024,26 +1024,39 @@ pub(crate) fn wheel_notches_of(ui: &Ui, id: egui::Id, hovered: bool, shift_notch
 /// Windows' default double-click time (Photoshop's; egui's own default is 0.3 s).
 const DOUBLE_CLICK_S: f64 = 0.5;
 
-/// Whether this click on `resp` completes a double-click, counted the Windows way (Photoshop):
-/// a click soon after a lone click at the same spot; the click after a double-click starts over.
-/// (egui would call a third quick click a triple-click even when the first two weren't a double.)
-fn second_click(ui: &Ui, resp: &Response) -> bool {
+/// Finger jitter between taps easily exceeds egui's 6 px `max_click_dist`; ~32 px is about a third of an inch at 96 DPI and matches common touch hit-slop (Windows' mouse SM_CXDOUBLECLK is only 4 px and is not used for touch).
+const TOUCH_MAX_CLICK_DIST: f32 = 32.0;
+
+/// True when this frame's pointer work came from a touch contact (still down, or a Touch event including End on the click frame).
+fn pointer_from_touch(ui: &Ui) -> bool {
+    ui.input(|i| i.any_touches() || i.events.iter().any(|e| matches!(e, egui::Event::Touch { .. })))
+}
+
+/// Whether this click on `resp` completes a double-click / double-tap, counted the Windows way (Photoshop): a click soon after a lone click near the same spot; the click after a double starts over.
+///
+/// Time window is 0.5 s (Windows / Photoshop; egui's default is 0.3 s). Mouse uses egui's `max_click_dist` (6 px); touch uses 32 px so finger jitter between taps still counts. Call on every click for that widget so the first tap is remembered.
+pub fn second_click(ui: &Ui, resp: &Response) -> bool {
     if !resp.clicked() {
         return false;
     }
     let key = resp.id.with("pc-last-click");
-    let (time, pos) = ui.input(|i| (i.time, i.pointer.interact_pos()));
-    let dist = ui.ctx().options(|o| o.input_options.max_click_dist);
-    let last: Option<(f64, Pos2)> = ui.data(|d| d.get_temp(key));
+    // Prefer the response's hit pos: raw `pointer.interact_pos` can be unset on a release-only frame.
+    let pos = resp.interact_pointer_pos().or_else(|| ui.input(|i| i.pointer.interact_pos()));
+    let time = ui.input(|i| i.time);
+    let touch = pointer_from_touch(ui);
+    let mouse_dist = ui.ctx().options(|o| o.input_options.max_click_dist);
+    let last: Option<(f64, Pos2, bool)> = ui.data(|d| d.get_temp(key));
+    // Looser distance if either tap in the pair was touch (End clears `any_touches` but leaves Touch in `events`).
+    let dist = if touch || last.is_some_and(|(_, _, t)| t) { TOUCH_MAX_CLICK_DIST.max(mouse_dist) } else { mouse_dist };
     let double = match (last, pos) {
-        (Some((t, p)), Some(q)) => time - t < DOUBLE_CLICK_S && p.distance(q) < dist,
+        (Some((t, p, _)), Some(q)) => time - t < DOUBLE_CLICK_S && p.distance(q) < dist,
         _ => false,
     };
     ui.data_mut(|d| {
         if let (false, Some(q)) = (double, pos) {
-            d.insert_temp(key, (time, q));
+            d.insert_temp(key, (time, q, touch));
         } else {
-            d.remove::<(f64, Pos2)>(key);
+            d.remove::<(f64, Pos2, bool)>(key);
         }
     });
     double
