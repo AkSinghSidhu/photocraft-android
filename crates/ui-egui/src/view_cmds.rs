@@ -635,6 +635,25 @@ fn flag_param(p: &Value, cur: bool) -> bool {
 fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p: &Value) -> Result<Value, String> {
     if let Some((panel, tab)) = panel_tab(app, id) {
         let group = crate::dock::Group::from_key(panel);
+        // The phone layout draws a group only as the sheet its rail button opens
+        // (`panels::phone_dock`): Window › <panel> opens it there too, and closes it when it's
+        // the one already open.
+        if app.compact_layout
+            && let Some(g) = group
+        {
+            let show = p.get("show").or_else(|| p.get("on")).and_then(Value::as_bool);
+            let same_tab = *panel_state(app, panel).1 == tab;
+            if show == Some(false) || (show.is_none() && app.phone_panel == Some(g) && same_tab && !id.starts_with("type.panels.")) {
+                app.phone_panel = None;
+                return Ok(json!({"panel": panel, "tab": tab, "visible": false}));
+            }
+            let (vis, cur) = panel_state(app, panel);
+            *vis = true;
+            *cur = tab;
+            crate::dock::reveal(app, g);
+            app.phone_panel = Some(g);
+            return Ok(json!({"panel": panel, "tab": tab, "visible": true}));
+        }
         let collapsed = group.is_some_and(|g| app.ui.dock.is_collapsed(g));
         let (vis, cur) = panel_state(app, panel);
         let requested = match p.get("show").or_else(|| p.get("on")) {

@@ -44,3 +44,18 @@ fn the_canvas_keeps_the_width_and_a_group_opens_over_it() {
     h.run_steps(2);
     assert_eq!(h.state().0.phone_panel, None);
 }
+
+#[test]
+fn window_menu_panels_open_as_the_sheet() {
+    let mut h = harness();
+    let ctx = h.ctx.clone();
+    crate::menus::invoke(&mut h.state_mut().0, &ctx, "window.panel.character", serde_json::json!({})).unwrap();
+    h.run_steps(3);
+    assert_eq!(h.state().0.phone_panel, Some(Group::Character));
+    assert!(matches!(crate::dock::last_rects(&h.ctx).as_slice(), [(Group::Character, _)]), "Character is drawn");
+    // The same item again puts it away; another panel's item swaps to it.
+    crate::menus::invoke(&mut h.state_mut().0, &ctx, "window.panel.character", serde_json::json!({})).unwrap();
+    assert_eq!(h.state().0.phone_panel, None);
+    crate::menus::invoke(&mut h.state_mut().0, &ctx, "window.panel.layers", serde_json::json!({})).unwrap();
+    assert_eq!(h.state().0.phone_panel, Some(Group::Layers));
+}
