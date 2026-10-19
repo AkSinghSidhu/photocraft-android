@@ -31,6 +31,11 @@ static ERASES: Mutex<[bool; 4]> = Mutex::new([false, false, false, true]);
 /// The controls in use in the pen's last event, and the presses since [`take_presses`].
 static HELD: Mutex<[bool; 4]> = Mutex::new([false; 4]);
 static PRESSES: Mutex<Vec<Press>> = Mutex::new(Vec::new());
+/// Where the pen touched in each move sample (historical ones included), window pixels, since
+/// [`take_pen_path`].
+static PATH: Mutex<Vec<(f32, f32)>> = Mutex::new(Vec::new());
+/// The most [`PATH`] holds (a second of a fast digitizer, if nothing takes it).
+const PATH_MAX: usize = 480;
 /// The button state of the pen's last event, as Android reported it ([`last_buttons`]).
 static LAST_BUTTONS: Mutex<i32> = Mutex::new(0);
 
@@ -67,6 +72,31 @@ pub fn controls_held() -> [bool; 4] {
 /// settings can show what an unusual pen sends.
 pub fn last_buttons() -> i32 {
     *LAST_BUTTONS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The pen's positions (window pixels, oldest first) for every move sample since the last call,
+/// the ones Android batched between events included. winit passes on only each event's
+/// latest position, so a quick curve would be drawn from a few straight pieces.
+pub fn take_pen_path() -> Vec<(f32, f32)> {
+    std::mem::take(&mut *PATH.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+fn track_path(action: i32, tool_type: i32, x: f32, y: f32) {
+    if tool_type != tool::STYLUS && tool_type != tool::ERASER {
+        return;
+    }
+    let mut path = PATH.lock().unwrap_or_else(PoisonError::into_inner);
+    match action {
+        // A new contact: earlier samples belong to the last stroke.
+        motion::action::DOWN => path.clear(),
+        motion::action::MOVE if x.is_finite() && y.is_finite() => {
+            if path.len() >= PATH_MAX {
+                path.remove(0);
+            }
+            path.push((x, y));
+        }
+        _ => {}
+    }
 }
 
 /// The presses since the last call, oldest first.
@@ -155,6 +185,7 @@ pub extern "system" fn Java_ai_storyteller_photocraft_PhotoCraftActivity_nativeP
 ) {
     saw_pen(tool);
     track_controls(action, tool, buttons, x, y);
+    track_path(action, tool, x, y);
     let e = RawEvent { action, tool, buttons, pressure, tilt, orientation };
     if let Update::Set(sample) = handle_with(&e, *ERASES.lock().unwrap_or_else(PoisonError::into_inner)) {
         let guard = SINK.lock().unwrap_or_else(PoisonError::into_inner);
