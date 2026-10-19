@@ -165,6 +165,8 @@ pub enum Routed {
     View(ViewMove),
     /// A quick tap with this many fingers on the canvas.
     Tap(usize),
+    /// A sideways swipe moved the scrolling strip (the options bar) this far, in points.
+    StripScroll(f32),
 }
 
 /// What the router needs to know besides the events.
@@ -247,6 +249,8 @@ struct Hold {
 #[derive(Clone, Copy, Debug)]
 struct Glide {
     velocity: Vec2,
+    /// Glides the strip rather than wheeling what's under the pointer.
+    strip: bool,
 }
 
 /// The canvas fingers from the first one down to the last one up (for taps).
@@ -340,12 +344,16 @@ impl Router {
             self.glide = None;
         }
         if let Some(g) = &mut self.glide {
-            out.push(Routed::App(Event::MouseWheel {
-                unit: MouseWheelUnit::Point,
-                delta: g.velocity * dt,
-                phase: TouchPhase::Move,
-                modifiers: Modifiers::NONE,
-            }));
+            if g.strip {
+                out.push(Routed::StripScroll(g.velocity.x * dt));
+            } else {
+                out.push(Routed::App(Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: g.velocity * dt,
+                    phase: TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                }));
+            }
             let speed = g.velocity.length();
             let slower = (speed - GLIDE_FRICTION * dt).max(0.0);
             g.velocity = if speed > 0.0 { g.velocity * (slower / speed) } else { Vec2::ZERO };
@@ -535,13 +543,19 @@ impl Router {
             Role::Ui => {
                 if let Some(last) = self.scroll {
                     let c = self.center(Role::Ui);
-                    out.push(Routed::App(Event::PointerMoved(c)));
-                    out.push(Routed::App(Event::MouseWheel {
-                        unit: MouseWheelUnit::Point,
-                        delta: (c - last) * self.scroll_axes,
-                        phase: TouchPhase::Move,
-                        modifiers: Modifiers::NONE,
-                    }));
+                    if self.scroll_axes.y == 0.0 {
+                        // The strip scrolls itself: as the wheel, the dropdown under the finger
+                        // would step through its options instead.
+                        out.push(Routed::StripScroll(c.x - last.x));
+                    } else {
+                        out.push(Routed::App(Event::PointerMoved(c)));
+                        out.push(Routed::App(Event::MouseWheel {
+                            unit: MouseWheelUnit::Point,
+                            delta: c - last,
+                            phase: TouchPhase::Move,
+                            modifiers: Modifiers::NONE,
+                        }));
+                    }
                     self.scroll = Some(c);
                     self.trail.push((env.now, c));
                     self.trail.retain(|(t, _)| env.now - t <= 0.12);
@@ -597,7 +611,7 @@ impl Router {
                     };
                     self.trail.clear();
                     if lifted && velocity.length() >= GLIDE_MIN {
-                        self.glide = Some(Glide { velocity });
+                        self.glide = Some(Glide { velocity, strip: self.scroll_axes.y == 0.0 });
                     } else {
                         self.gone_pending = true;
                     }
@@ -1269,8 +1283,8 @@ mod tests {
         assert!(presses(&g.wait(HOLD_TIME + 0.01)).is_empty(), "a strip waits as long as a list row");
         let out = g.send(vec![touch(1, TouchPhase::Move, p + vec2(-60.0, 4.0))]);
         assert!(presses(&out).is_empty(), "nothing pressed");
-        let w = wheel(&out);
-        assert!(w.x < -40.0 && w.y == 0.0, "sideways only: {w:?}");
+        let dx: f32 = out.iter().filter_map(|r| if let Routed::StripScroll(d) = r { Some(*d) } else { None }).sum();
+        assert!(dx < -40.0 && wheel(&out) == Vec2::ZERO, "the strip itself, not the wheel: {dx} {out:?}");
         g.send(vec![touch(1, TouchPhase::End, p + vec2(-60.0, 4.0))]);
         // Held still first, a drag works the control under the finger.
         g.wait(2.0);
