@@ -104,6 +104,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 font_outcome,
                 touch,
                 layout,
+                pen_path: Vec::new(),
                 drawn: Default::default(),
             }))
         }),
@@ -132,6 +133,8 @@ struct Shell {
     font_outcome: crate::fonts::Outcome,
     /// Touch gestures and their settings (see [`crate::touch`]).
     touch: crate::touch::TouchInput,
+    /// Pen sample positions not yet put into a frame (see [`crate::pen_path`]).
+    pen_path: Vec<(f32, f32)>,
     /// Phone or tablet layout (see [`crate::layout`]).
     layout: crate::layout::Layout,
     /// Where the last frame drew everything (see [`crate::touch::Snapshot`]).
@@ -262,6 +265,20 @@ impl eframe::App for Shell {
             scroll_strip: photocraft_ui_egui::panels::options_bar_overflow(ctx),
             now: raw_input.time.unwrap_or_else(|| ctx.input(|i| i.time)),
         };
+        // Every pen sample's position, not just each event's latest (see `pen_path`). Samples
+        // wait for a frame with the pen's touch in it; a new touch-down drops older ones.
+        let is_pen = |id: egui::TouchId| matches!(android::pointer_tool(id.0), Some(motion::tool::STYLUS | motion::tool::ERASER));
+        if raw_input.events.iter().any(|e| matches!(e, egui::Event::Touch { id, phase: egui::TouchPhase::Start, .. } if is_pen(*id))) {
+            self.pen_path.clear();
+        }
+        self.pen_path.extend(android::take_pen_path());
+        if self.pen_path.len() > 480 {
+            let extra = self.pen_path.len() - 480;
+            self.pen_path.drain(..extra);
+        }
+        if crate::pen_path::splice(&mut raw_input.events, &self.pen_path, ctx.pixels_per_point(), is_pen) > 0 {
+            self.pen_path.clear();
+        }
         let drawn = &self.drawn;
         self.pad.input(ctx, raw_input, &env, |p| drawn.covered(p));
         // A side button pressed while the pen hovers: a right-click under the pen (after the
