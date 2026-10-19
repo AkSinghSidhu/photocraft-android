@@ -392,10 +392,19 @@ fn display_scale(pref: prefs::UiScale, native: Option<f32>) -> f32 {
     }
 }
 
+/// Interface › UI Scale › Auto in the phone layout ([`PhotocraftApp::compact_layout`]): a phone's
+/// own scale, made for apps laid out for its screen, leaves a desktop-class interface too little
+/// room, so Auto is this much of it there.
+pub const COMPACT_AUTO_SCALE: f32 = 0.75;
+
 fn sync_display_scale(app: &PhotocraftApp, ctx: &egui::Context) {
     let native = ctx.native_pixels_per_point();
     let native_scale = native.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(1.0);
-    let scale = display_scale(app.session.prefs().interface.ui_scale, native);
+    let pref = app.session.prefs().interface.ui_scale;
+    let mut scale = display_scale(pref, native);
+    if app.compact_layout && pref == prefs::UiScale::Auto {
+        scale *= COMPACT_AUTO_SCALE;
+    }
     ctx.set_zoom_factor(scale / native_scale);
 }
 
@@ -1536,10 +1545,9 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
     // Checkboxes line up at the left edge, as in Photoshop; the other options keep a label column.
     let (checks, other): (Vec<String>, Vec<String>) = rest.cloned().partition(|k| obj.get(k).is_some_and(Value::is_boolean));
     let rows = AppearanceRows::matching(query);
-    let grid = |id: &str| egui::Grid::new(("prefs-grid", id.to_string())).num_columns(2).spacing([14.0, 7.0]).min_col_width(150.0);
     if rows.any() || !appearance.is_empty() {
         pref_group(ui, "Appearance", |ui| {
-            grid("interface-appearance").show(ui, |ui| {
+            field_grid(ui, "interface-appearance", 14.0, Some(150.0), |ui| {
                 appearance_rows(ui, obj, system, rows);
                 field_rows(ui, "interface", obj, appearance, lang);
             });
@@ -1547,13 +1555,13 @@ fn interface_groups(ui: &mut egui::Ui, obj: &mut Map<String, Value>, keys: &[Str
     }
     if !presentation.is_empty() {
         pref_group(ui, "Presentation", |ui| {
-            grid("interface-presentation").show(ui, |ui| field_rows(ui, "interface", obj, presentation, lang));
+            field_grid(ui, "interface-presentation", 14.0, Some(150.0), |ui| field_rows(ui, "interface", obj, presentation, lang));
         });
     }
     if !checks.is_empty() || !other.is_empty() {
         pref_group(ui, "Options", |ui| {
-            egui::Grid::new("prefs-grid-interface-checks").num_columns(2).spacing([0.0, 7.0]).show(ui, |ui| field_rows(ui, "interface", obj, checks, lang));
-            grid("interface-options").show(ui, |ui| field_rows(ui, "interface", obj, other, lang));
+            field_grid(ui, "interface-checks", 0.0, None, |ui| field_rows(ui, "interface", obj, checks, lang));
+            field_grid(ui, "interface-options", 14.0, Some(150.0), |ui| field_rows(ui, "interface", obj, other, lang));
         });
     }
 }
@@ -1608,7 +1616,27 @@ fn section_fields(
         rendering_mode_row(ui, obj);
     }
     keys.retain(|k| field_visible(section, obj, k, &query));
-    egui::Grid::new(("prefs-grid", section)).num_columns(2).spacing([14.0, 7.0]).show(ui, |ui| field_rows(ui, section, obj, keys, lang));
+    field_grid(ui, section, 14.0, None, |ui| field_rows(ui, section, obj, keys, lang));
+}
+
+/// Narrower than this, a section's labels sit above their controls instead of beside them (a
+/// phone held upright).
+const STACKED_ROWS_WIDTH: f32 = 460.0;
+
+/// A section's rows: labels in a column beside the controls, or above them when narrow.
+fn field_grid(ui: &mut egui::Ui, id: &str, gap: f32, min_label: Option<f32>, rows: impl FnOnce(&mut egui::Ui)) {
+    if ui.available_width() < STACKED_ROWS_WIDTH {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 4.0;
+            rows(ui);
+        });
+        return;
+    }
+    let mut grid = egui::Grid::new(("prefs-grid", id.to_string())).num_columns(2).spacing([gap, 7.0]);
+    if let Some(w) = min_label {
+        grid = grid.min_col_width(w);
+    }
+    grid.show(ui, rows);
 }
 
 /// One grid row per setting in `keys` (already filtered by `field_visible`).

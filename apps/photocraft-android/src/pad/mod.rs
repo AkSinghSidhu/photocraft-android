@@ -9,8 +9,9 @@
 //!   functions (without opening the ring).
 //! - Each key can have a colour (Window › Shortcut Pad › Shortcut Pad Settings…), so keys are
 //!   told apart by what they do at a glance.
-//! - The key above the keyboard key (next), always there too, enters full screen and leaves it again (full screen
-//!   has no menu bar, so without a keyboard there was no way back).
+//! - The key above the keyboard key (next), always there too, steps through full screen: first
+//!   keeping the tool and options bars, then the canvas alone, then back (full screen has no
+//!   menu bar, so without a keyboard there was no way back).
 //! - The key at the very bottom, always there, opens the on-screen keyboard (and closes it
 //!   again); its letters reach the app's shortcuts.
 //! - Window › Shortcut Pad shows or hides it, moves it to either side and opens its settings
@@ -87,10 +88,12 @@ pub struct Pad {
     pub keyboard_on: bool,
     /// The full screen key was tapped (the screen mode switches in `run_pending`).
     screen_tapped: bool,
-    /// The app was in a full screen mode last frame (the key shows the way back).
-    full_screen: bool,
+    /// The screen mode last frame, for the full screen key's icon.
+    screen_step: ScreenStep,
     /// The window's content area last frame (keeps the large ring on screen).
     screen: egui::Rect,
+    /// The phone layout: a slimmer pad ([`router::COMPACT_WIDTH`]).
+    pub compact: bool,
     /// Brush size and hardness as the turn has set them, unrounded, so slow turns add up.
     size_target: Option<f32>,
     hardness_target: Option<f32>,
@@ -140,8 +143,9 @@ impl Pad {
             keyboard_tapped: false,
             keyboard_on: false,
             screen_tapped: false,
-            full_screen: false,
+            screen_step: ScreenStep::Normal,
             screen: egui::Rect::NOTHING,
+            compact: false,
             size_target: None,
             hardness_target: None,
             views: Vec::new(),
@@ -321,11 +325,13 @@ impl Pad {
     /// merged: one zoom, one rotation, one brush change, however many touch events came in.
     pub fn run_pending(&mut self, app: &mut PhotocraftApp, ctx: &egui::Context) {
         if self.take_screen_tap() {
-            // Out of either full screen mode, or into the one without the menu bar.
-            let next = if app.ui.view.screen_mode == "standard" { "view.screenMode.fullScreen" } else { "view.screenMode.standard" };
-            if let Err(e) = photocraft_ui_egui::menus::invoke(app, ctx, next, serde_json::json!({})) {
+            // Normal → full screen keeping the tool and options bars → full screen → normal.
+            let next = ScreenStep::of(app).next();
+            let mode = if next == ScreenStep::Normal { "view.screenMode.standard" } else { "view.screenMode.fullScreen" };
+            if let Err(e) = photocraft_ui_egui::menus::invoke(app, ctx, mode, serde_json::json!({})) {
                 log::warn!("Shortcut Pad full screen key: {e}");
             }
+            app.full_screen_toolbar = next == ScreenStep::WithToolbar;
             ctx.request_repaint();
         }
         let views = std::mem::take(&mut self.views);
@@ -420,7 +426,7 @@ impl Pad {
     /// Draw the pad (before the app, which then lays out in the rest of the window).
     pub fn show(&mut self, ui: &mut egui::Ui, tk: &Tokens, app: &PhotocraftApp) {
         self.screen = ui.ctx().content_rect();
-        self.full_screen = app.ui.view.screen_mode != "standard";
+        self.screen_step = ScreenStep::of(app);
         let config = self.shared.borrow().config.clone();
         if !config.enabled {
             self.layout = None;
@@ -433,7 +439,7 @@ impl Pad {
         let frame = egui::Frame::new().fill(tk.chrome).stroke(Stroke::new(1.0, tk.separator));
         let mode = self.mode();
         let layout = panel
-            .exact_size(router::WIDTH)
+            .exact_size(if self.compact { router::COMPACT_WIDTH } else { router::WIDTH })
             .resizable(false)
             .frame(frame)
             .show(ui, |ui| {
@@ -499,12 +505,19 @@ impl Pad {
         self.paint_screen_key(p, l.screen_mode, tk);
     }
 
-    /// The full screen key, drawn like a video player's: four corners pointing out to go full
-    /// screen, pointing in (and lit) to come back.
+    /// The full screen key, drawn like a video player's, showing what a tap does: four corners
+    /// pointing out to go (further) full screen, pointing in to come back. Lit in full screen;
+    /// with the tool bar kept, a bar along its left edge.
     fn paint_screen_key(&self, p: &egui::Painter, rect: egui::Rect, tk: &Tokens) {
-        let on = self.full_screen;
-        p.rect(rect, tk.radius, if on { tk.accent } else { tk.field }, Stroke::new(1.0, tk.field_border), egui::StrokeKind::Inside);
-        let ink = Stroke::new(2.0, if on { tk.primary_text } else { tk.text });
+        let step = self.screen_step;
+        let lit = step != ScreenStep::Normal;
+        p.rect(rect, tk.radius, if lit { tk.accent } else { tk.field }, Stroke::new(1.0, tk.field_border), egui::StrokeKind::Inside);
+        let ink = Stroke::new(2.0, if lit { tk.primary_text } else { tk.text });
+        let on = step.next() == ScreenStep::Normal;
+        if step == ScreenStep::WithToolbar {
+            let x = rect.left() + 5.0;
+            p.line_segment([egui::pos2(x, rect.top() + 6.0), egui::pos2(x, rect.bottom() - 6.0)], Stroke::new(3.0, ink.color));
+        }
         let half = (rect.height() * 0.28).min(rect.width() * 0.3);
         let arm = half * 0.55;
         let c = rect.center();
@@ -658,6 +671,34 @@ fn key_event(key: Key, pressed: bool) -> Event {
     Event::Key { key, physical_key: Some(key), pressed, repeat: false, modifiers: Modifiers::NONE }
 }
 
+/// Where the full screen key is in its cycle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScreenStep {
+    Normal,
+    /// Full screen with the tool and options bars kept (the first step).
+    WithToolbar,
+    Full,
+}
+
+impl ScreenStep {
+    fn of(app: &PhotocraftApp) -> Self {
+        match app.ui.view.screen_mode.as_str() {
+            "standard" => ScreenStep::Normal,
+            "fullScreen" if app.full_screen_toolbar => ScreenStep::WithToolbar,
+            _ => ScreenStep::Full,
+        }
+    }
+
+    /// What a tap goes to.
+    fn next(self) -> Self {
+        match self {
+            ScreenStep::Normal => ScreenStep::WithToolbar,
+            ScreenStep::WithToolbar => ScreenStep::Full,
+            ScreenStep::Full => ScreenStep::Normal,
+        }
+    }
+}
+
 /// Dark or light text, whichever reads on `fill`.
 fn contrasting_text(fill: egui::Color32) -> egui::Color32 {
     let luma = 0.299 * fill.r() as f32 + 0.587 * fill.g() as f32 + 0.114 * fill.b() as f32;
@@ -745,7 +786,16 @@ mod tests {
     fn run(p: &mut Pad, events: Vec<Event>) -> Vec<Event> {
         let mut raw = egui::RawInput { events, ..Default::default() };
         let config = crate::touch::config::TouchConfig::default();
-        let env = Env { canvas: None, is_finger: &|_| true, pen_near: false, config: &config, list_item: &|_| false, secondary: &|_| false, now: 0.0 };
+        let env = Env {
+            canvas: None,
+            is_finger: &|_| true,
+            pen_near: false,
+            config: &config,
+            list_item: &|_| false,
+            secondary: &|_| false,
+            scroll_strip: None,
+            now: 0.0,
+        };
         p.input(&egui::Context::default(), &mut raw, &env, |_| false);
         raw.events
     }
@@ -807,6 +857,12 @@ mod tests {
         assert_eq!(p.mode(), WheelMode::Rotate);
         assert!(p.pending.is_empty());
         std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn the_full_screen_key_keeps_the_bars_first_then_hides_everything() {
+        use ScreenStep::*;
+        assert_eq!((Normal.next(), WithToolbar.next(), Full.next()), (WithToolbar, Full, Normal));
     }
 
     #[test]

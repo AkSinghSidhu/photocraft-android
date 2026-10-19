@@ -908,6 +908,16 @@ fn options_bar_height(pro: bool, narrow: bool) -> f32 {
     }
 }
 
+fn options_bar_overflow_id() -> egui::Id {
+    egui::Id::new("options-bar-overflow")
+}
+
+/// The options bar's scrolling strip, when its controls run past the window's width (as laid
+/// out last frame): a touch screen scrolls it with a sideways swipe.
+pub fn options_bar_overflow(ctx: &egui::Context) -> Option<egui::Rect> {
+    ctx.data(|d| d.get_temp::<Option<egui::Rect>>(options_bar_overflow_id())).flatten()
+}
+
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     let t = Tokens::get(ui.ctx());
     let narrow = app.session.prefs().workspace.narrow_options_bar();
@@ -916,7 +926,7 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
         .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(10, 0)))
         .show(ui, |ui| {
             ui.style_mut().spacing.scroll = egui::style::ScrollStyle { bar_width: 4.0, ..egui::style::ScrollStyle::floating() };
-            egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
+            let scrolled = egui::ScrollArea::horizontal().id_salt("tool-options").auto_shrink([false, false]).show(ui, |ui| {
             // Font ink can extend beyond its advance width at fractional positions.
             // Include its gutter in the container layout, including right-aligned actions.
             egui::Frame::NONE.inner_margin(egui::Margin { right: 2, ..Default::default() }).show(ui, |ui| {
@@ -1514,6 +1524,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             reveal_focused_control(ui);
             });
             });
+            // Where a sideways swipe should scroll the bar (Android's touch router): only when it overflows.
+            let overflow = scrolled.content_size.x > scrolled.inner_rect.width() + 1.0;
+            ui.ctx().data_mut(|d| d.insert_temp(options_bar_overflow_id(), overflow.then_some(scrolled.inner_rect)));
         });
 }
 
@@ -1667,6 +1680,10 @@ pub fn status_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
 // ----------------------------------------------------------------------------- dock
 
 pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    if app.compact_layout {
+        phone_dock(app, ui);
+        return;
+    }
     // Even legacy destinations must discard gestures captured by an earlier workspace.
     let customized = crate::panel_docking::show(app, ui);
     let t = Tokens::get(ui.ctx());
@@ -1688,15 +1705,7 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 ui.painter().line_segment([pos2(x, r.top() - 8.0), pos2(x, r.bottom() + 8.0)], Stroke::new(1.0, t.separator));
                 ui.spacing_mut().item_spacing.y = 4.0;
                 use crate::dock::Group;
-                let entries: [(&str, &str, Group); 6] = [
-                    ("sliders-horizontal", tl!("Properties"), Group::Properties),
-                    ("navigation", tl!("Navigator"), Group::Navigator),
-                    ("palette", tl!("Color & Swatches"), Group::Color),
-                    ("layers", tl!("Layers"), Group::Layers),
-                    ("clock", tl!("History"), Group::History),
-                    ("brush", tl!("Brushes"), Group::Brushes),
-                ];
-                for (icon, name, g) in entries {
+                for (icon, name, g) in rail_entries() {
                     // Studio floats Properties outside the dock.
                     let docked = t.pro || g != Group::Properties;
                     let on = if customized { crate::panel_docking::rail_on(app, g) } else { g.shown(&p) && !(docked && app.ui.dock.is_collapsed(g)) };
@@ -1713,6 +1722,74 @@ pub fn right_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
     if !t.pro && !customized {
         dock_panels(app, ui, &p, &t);
     }
+    crate::dock::persist(app, ui.ctx());
+}
+
+/// The rail's groups: icon, name, group.
+fn rail_entries() -> [(&'static str, &'static str, crate::dock::Group); 6] {
+    use crate::dock::Group;
+    [
+        ("sliders-horizontal", tl!("Properties"), Group::Properties),
+        ("navigation", tl!("Navigator"), Group::Navigator),
+        ("palette", tl!("Color & Swatches"), Group::Color),
+        ("layers", tl!("Layers"), Group::Layers),
+        ("clock", tl!("History"), Group::History),
+        ("brush", tl!("Brushes"), Group::Brushes),
+    ]
+}
+
+/// The phone layout's dock ([`PhotocraftApp::compact_layout`]): a side-by-side dock would take
+/// most of a phone's width, so only the icon rail stays. A rail button opens its group as a
+/// sheet over the canvas, one group at a time; the same button, Esc, or closing or collapsing
+/// the group puts it away.
+fn phone_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
+    let t = Tokens::get(ui.ctx());
+    // Finger-sized buttons.
+    let (rw, rb) = (44.0, 36.0);
+    let rail = crate::direction::end_panel("rail")
+        .resizable(false)
+        .exact_size(rw)
+        .frame(egui::Frame::NONE.fill(t.chrome).inner_margin(egui::Margin::symmetric(4, 8)))
+        .show(ui, |ui| {
+            let r = ui.max_rect();
+            let x = if crate::direction::is_rtl() { r.right() + 4.0 } else { r.left() - 4.0 };
+            ui.painter().line_segment([pos2(x, r.top() - 8.0), pos2(x, r.bottom() + 8.0)], Stroke::new(1.0, t.separator));
+            ui.spacing_mut().item_spacing.y = 6.0;
+            for (icon, name, g) in rail_entries() {
+                let on = app.phone_panel == Some(g);
+                if icons::rail_button(ui, icon, rb, on, name).clicked() {
+                    app.phone_panel = if on { None } else { Some(g) };
+                    if !on {
+                        crate::dock::reveal(app, g);
+                    }
+                }
+            }
+        })
+        .response
+        .rect;
+    let Some(g) = app.phone_panel else { return };
+    // Put away when its group was closed or collapsed from its own tab strip, or with Esc.
+    if !g.shown(&app.ui.panels) || app.ui.dock.is_collapsed(g) || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        app.phone_panel = None;
+        app.ui.dock.set_collapsed(g, false);
+        return;
+    }
+    let screen = ui.ctx().content_rect();
+    let w = (screen.width() - rw - 56.0).clamp(220.0, 360.0);
+    let rect = if crate::direction::is_rtl() {
+        egui::Rect::from_min_size(pos2(rail.right(), rail.top()), vec2(w, rail.height()))
+    } else {
+        egui::Rect::from_min_max(pos2(rail.left() - w, rail.top()), pos2(rail.left(), rail.bottom()))
+    };
+    egui::Area::new(egui::Id::new("phone-panel-sheet")).order(egui::Order::Middle).fixed_pos(rect.min).constrain(false).show(ui.ctx(), |ui| {
+        let frame = egui::Frame::NONE.fill(t.dock).stroke(Stroke::new(1.0, t.separator)).inner_margin(egui::Margin::same(2));
+        frame.show(ui, |ui| {
+            let inner = rect.size() - vec2(4.0, 4.0);
+            ui.set_min_size(inner);
+            ui.set_max_size(inner);
+            crate::dock::show(app, ui, &[g], dock_body);
+        });
+    });
     crate::dock::persist(app, ui.ctx());
 }
 

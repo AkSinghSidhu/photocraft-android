@@ -20,6 +20,7 @@ pub mod bridge;
 pub mod fonts;
 pub mod ime;
 pub mod keys;
+pub mod layout;
 pub mod pad;
 pub mod services;
 pub mod touch;

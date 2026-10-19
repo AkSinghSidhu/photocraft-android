@@ -83,10 +83,11 @@ without a keyboard.
   function and its value (zoom %, angle, size, hardness). The centre is a button: a tap
   switches function without opening the large ring; the lights on the small wheel show which
   one is active.
-- **Full screen key** (always there, just above the keyboard key): enters full screen and leaves
-  it again, so full screen (which has no menu bar) never needs a keyboard to get out of. It is
-  drawn like a video player's button: corners pointing out, or pointing in and lit while in
-  full screen.
+- **Full screen key** (always there, just above the keyboard key): steps through full screen
+  keeping the tool bar and options bar, full screen with the canvas alone, and back, so full
+  screen (which has no menu bar) never needs a keyboard to get out of. It is drawn like a video
+  player's button and shows what a tap does: corners pointing out (lit, with a bar along its
+  edge, while the bars are kept), or pointing in to come back.
 - **Keyboard key** (always at the very bottom): opens the on-screen keyboard with no text field
   needed, and closes it when tapped again (or put the keyboard away with its own hide key; the
   pad's key, lit while the keyboard is open, goes dark). With no field focused, letters and
@@ -124,6 +125,7 @@ Multi-touch gestures, set up in **Window › Touch Input** (finger mode, palm re
 | Fingers while the pen is on or near the screen | Ignored (palm rejection); a pen touching down drops resting fingers | Off |
 | Two fingers over menus, panels and lists | Scroll them | Off |
 | One finger on a list row (Brushes, Layers, presets) | Swiping up or down scrolls the list; hold still for a moment, then drag, to reorder; a sideways drag moves a slider | |
+| One finger on the options bar, when it's wider than the screen | Swiping sideways scrolls it; hold still for a moment, then drag, to work a slider or number field | |
 | A finger held still on a button, tab, panel or row (about 0.8 s) | Right-clicks it (context menus, closing panels) | Off |
 | A mouse's right button | Right-clicks | |
 
@@ -145,6 +147,25 @@ each pointer's tool type as it goes down (`nativePointer`, `photocraft-tablet`'s
 at once. Canvas gestures become view moves applied to the active document's camera
 (`src/touch/mod.rs`: zoom, centre and rotation, keeping the document point under the fingers),
 taps press their shortcut like a pad key, and two fingers over the interface become wheel events.
+
+## Phone layout
+
+**Window › Layout** picks **Automatic** (the default), **Phone** or **Tablet**. Automatic uses the
+phone layout when the screen's smallest side is under 600 dp, Android's own phone/tablet line,
+so a phone stays a phone on its side; it is checked every frame, so rotating, a foldable opening
+or split screen switches at once. The phone layout:
+
+- **Panels:** the right-hand dock is only its icon rail (Properties, Navigator, Color &
+  Swatches, Layers, History, Brushes, with finger-sized buttons). A rail button opens its group
+  as a sheet over the canvas, one at a time, without squeezing the canvas; the same button,
+  Esc, or closing or collapsing the group puts it away.
+- **Interface scale:** Preferences › Interface › UI Scale › Auto is 75% of the phone's own
+  scale, so a desktop-class interface has room. A fixed scale is left as chosen.
+- **Dialogs** take the screen's width, stay centred and scroll when taller than the screen, so
+  OK and Cancel can always be reached. Preferences puts each label above its setting.
+- **Shortcut Pad:** slimmer (56 points instead of 72).
+
+On every screen, no dialog's minimum size is bigger than the window.
 
 ## Fonts
 
