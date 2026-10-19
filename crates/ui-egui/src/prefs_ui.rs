@@ -971,7 +971,7 @@ pub fn apply(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
 /// Max dialog width for our dialogs.
 pub fn width(fields: &Map<String, Value>, available: f32) -> Option<f32> {
     match fields.get("__prefsui").and_then(Value::as_str)? {
-        "prefs" => Some(available.clamp(380.0, 1040.0)),
+        "prefs" => Some(available.clamp(240.0, 1040.0)),
         "shortcuts" => Some(720.0),
         _ => Some(460.0),
     }
@@ -1194,6 +1194,10 @@ fn preference_sections(values: &Value, search: &str) -> Vec<(&'static str, &'sta
         .collect()
 }
 
+/// Preferences' section list, and the narrowest its settings column gets beside it.
+const SECTION_LIST_WIDTH: f32 = 170.0;
+const MIN_SETTINGS_WIDTH: f32 = 340.0;
+
 /// Preferences: section list on the left, the section's settings on the right.
 fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui::Theme>) {
     let t = Tokens::get(ui.ctx());
@@ -1210,46 +1214,66 @@ fn prefs_body(ui: &mut egui::Ui, f: &mut Map<String, Value>, system: Option<egui
         section = (*first).to_string();
     }
     ui.add_space(6.0);
-    ui.horizontal_top(|ui| {
-        // Section list.
-        ui.vertical(|ui| {
-            ui.set_width(170.0);
-            if found.is_empty() {
-                ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
-            }
+    // Too narrow for the list beside the settings (a phone held upright): the sections are a
+    // menu above them.
+    let narrow = ui.available_width() < SECTION_LIST_WIDTH + 12.0 + MIN_SETTINGS_WIDTH;
+    if narrow {
+        let current = found.iter().find(|(id, _)| *id == section).map_or(String::new(), |(_, title)| tl!(title).to_string());
+        egui::ComboBox::from_id_salt("prefs-section-menu").selected_text(current).width(ui.available_width()).show_ui(ui, |ui| {
             for &(id, title) in &found {
-                let sel = section == id;
-                let empty = !has_visible_fields(&values, id);
-                let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
-                if sel {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
-                } else if resp.hovered() {
-                    ui.painter().rect_filled(rect, t.radius_sm, t.hover);
-                }
-                let color = if sel {
-                    t.text
-                } else if empty {
-                    t.text_faint
-                } else {
-                    t.text_dim
-                };
-                // Translated section names can be longer than the column: elide them (the full
-                // name is the tooltip) instead of drawing over the settings.
-                let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
-                job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
-                let galley = ui.painter().layout_job(job);
-                let elided = galley.elided;
-                ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
-                let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
-                if resp.clicked() {
+                if ui.selectable_label(section == id, tl!(title)).clicked() {
                     section = id.to_string();
                 }
             }
         });
-        let content_height = (ui.ctx().content_rect().height() - 240.0).clamp(240.0, 680.0);
-        crate::widgets::vline(ui, content_height);
+        ui.add_space(6.0);
+    }
+    ui.horizontal_top(|ui| {
+        // Section list.
+        if !narrow {
+            ui.vertical(|ui| {
+                ui.set_width(170.0);
+                if found.is_empty() {
+                    ui.label(RichText::new(tl!("No matching settings")).color(t.text_dim));
+                }
+                for &(id, title) in &found {
+                    let sel = section == id;
+                    let empty = !has_visible_fields(&values, id);
+                    let (rect, resp) = ui.allocate_exact_size(vec2(170.0, 22.0), Sense::click());
+                    if sel {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.row_selected);
+                    } else if resp.hovered() {
+                        ui.painter().rect_filled(rect, t.radius_sm, t.hover);
+                    }
+                    let color = if sel {
+                        t.text
+                    } else if empty {
+                        t.text_faint
+                    } else {
+                        t.text_dim
+                    };
+                    // Translated section names can be longer than the column: elide them (the full
+                    // name is the tooltip) instead of drawing over the settings.
+                    let mut job = egui::text::LayoutJob::simple_singleline(tl!(title).to_string(), crate::theme::medium(12.5), color);
+                    job.wrap = egui::text::TextWrapping::truncate_at_width(rect.width() - 12.0);
+                    let galley = ui.painter().layout_job(job);
+                    let elided = galley.elided;
+                    ui.painter().galley(rect.left_center() + vec2(8.0, -galley.size().y / 2.0), galley, color);
+                    let resp = if elided { resp.on_hover_text(tl!(title)) } else { resp };
+                    if resp.clicked() {
+                        section = id.to_string();
+                    }
+                }
+            });
+        }
+        // On a short screen (a phone on its side) the settings get what's left, still scrolling.
+        let chrome = if narrow { 270.0 } else { 240.0 };
+        let content_height = (ui.ctx().content_rect().height() - chrome).clamp(120.0, 680.0);
+        if !narrow {
+            crate::widgets::vline(ui, content_height);
+        }
         ui.vertical(|ui| {
-            ui.set_width((ui.available_width() - 12.0).max(340.0));
+            ui.set_width(if narrow { ui.available_width() } else { (ui.available_width() - 12.0).max(MIN_SETTINGS_WIDTH) });
             let title = SECTIONS.iter().find(|(id, _)| *id == section).map_or("General", |(_, t)| *t);
             ui.label(RichText::new(tl!(&title)).font(crate::theme::semibold(14.0)).color(t.text));
             let show_all = search.trim().is_empty()
@@ -2561,7 +2585,8 @@ mod tests {
     fn preferences_dialog_width_follows_the_window() {
         let prefs = serde_json::json!({"__prefsui": "prefs"});
         let prefs = prefs.as_object().unwrap();
-        assert_eq!(super::width(prefs, 200.0), Some(380.0));
+        assert_eq!(super::width(prefs, 200.0), Some(240.0));
+        assert_eq!(super::width(prefs, 380.0), Some(380.0));
         assert_eq!(super::width(prefs, 800.0), Some(800.0));
         assert_eq!(super::width(prefs, 3000.0), Some(1040.0));
         let shortcuts = serde_json::json!({"__prefsui": "shortcuts"});

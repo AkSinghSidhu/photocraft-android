@@ -215,20 +215,22 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let compact = d.fields.contains_key("__compact");
             // The curve editor caps its graph allocation at 300 points (#5113).
             let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
+            // No minimum is wider than the window (a phone held upright).
+            let fit = (ctx.content_rect().width() - 24.0).max(240.0);
             if !compact {
-                ui.set_min_width(if curves { 300.0 } else { 380.0 });
+                ui.set_min_width((if curves { 300.0 } else { 380.0_f32 }).min(fit));
             }
-            let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
+            let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(240.0));
             if let Some(w) = wide {
-                ui.set_min_width(w.min(460.0));
+                ui.set_min_width(w.min(460.0).min(fit));
             }
             if d.kind == DialogKind::NewDocument {
-                ui.set_min_width(800.0);
+                ui.set_min_width(800.0_f32.min(fit));
             }
             // The About window: room for the contributor table, the same width on every tab.
             let about_tabs = d.kind == DialogKind::About && d.fields.get("systemInfo").and_then(Value::as_bool) != Some(true);
             if about_tabs {
-                ui.set_min_width(700.0);
+                ui.set_min_width(700.0_f32.min(fit));
             }
             ui.set_max_width(wide.unwrap_or(if d.kind == DialogKind::NewDocument {
                 800.0
