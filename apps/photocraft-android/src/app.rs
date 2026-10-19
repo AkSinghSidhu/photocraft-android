@@ -212,6 +212,37 @@ impl eframe::App for Shell {
         // The pad's touches become key presses (before the modifiers are worked out from them)
         // and wheel commands; the rest of the input goes on to the app.
         let config = self.touch.config();
+        // The pen's side buttons and eraser end (Touch Input settings): erasing is the pen
+        // hook's, right-clicks while touching are the router's, presses are handled here.
+        use crate::touch::config::{PenAction, PenControl};
+        use photocraft_tablet::{android, motion};
+        android::set_erasing_controls(config.erasing_controls());
+        let presses = android::take_presses();
+        for p in &presses {
+            let setting = config.pen(p.control);
+            if setting.action != PenAction::Shortcut {
+                continue;
+            }
+            match crate::pad::config::parse(&setting.shortcut) {
+                Ok(chord) if !chord.is_empty() => {
+                    raw_input.events.extend(crate::pad::press(chord));
+                    raw_input.events.extend(crate::pad::release(chord));
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("pen {:?}: {e}", p.control),
+            }
+        }
+        let secondary = |id: egui::TouchId| {
+            let buttons = android::pointer_buttons(id.0);
+            match android::pointer_tool(id.0) {
+                Some(motion::tool::MOUSE) => buttons & motion::button::SECONDARY != 0,
+                Some(t) => {
+                    let used = motion::controls(t, buttons);
+                    PenControl::ALL.iter().any(|c| used[c.index()] && config.pen(*c).action == PenAction::RightClick)
+                }
+                None => false,
+            }
+        };
         let env = crate::pad::router::Env {
             // Gestures move the canvas only while a document is open.
             canvas: self.app.session.active_index().map(|_| self.app.last_canvas_rect),
@@ -219,10 +250,30 @@ impl eframe::App for Shell {
             pen_near: photocraft_tablet::android::pen_seen_within(std::time::Duration::from_millis(300)),
             config: &config,
             list_item: &|p: egui::Pos2| self.drawn.list_item(p),
+            secondary: &secondary,
             now: raw_input.time.unwrap_or_else(|| ctx.input(|i| i.time)),
         };
         let drawn = &self.drawn;
         self.pad.input(ctx, raw_input, &env, |p| drawn.covered(p));
+        // A side button pressed while the pen hovers: a right-click under the pen (after the
+        // router, which replaces pointer events with its own).
+        let ppp = ctx.pixels_per_point();
+        for p in presses {
+            if let (Some((x, y)), PenAction::RightClick, PenControl::Lower | PenControl::Upper | PenControl::Top) =
+                (p.hover, config.pen(p.control).action, p.control)
+            {
+                let pos = egui::pos2(x / ppp, y / ppp);
+                raw_input.events.push(egui::Event::PointerMoved(pos));
+                for pressed in [true, false] {
+                    raw_input.events.push(egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Secondary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    });
+                }
+            }
+        }
         self.keys.apply(raw_input);
         self.app.raw_input_hook(ctx, raw_input);
     }
@@ -233,7 +284,7 @@ impl eframe::App for Shell {
         self.pad.show(ui, &tokens, &self.app);
         self.app.ui(ui, frame);
         self.pad.settings(ui.ctx(), &tokens);
-        self.touch.settings(ui.ctx(), &tokens);
+        self.touch.settings(ui.ctx(), &tokens, photocraft_tablet::android::controls_held(), photocraft_tablet::android::last_buttons());
         // What was drawn where, for the next frame's touches (see `touch::Snapshot`).
         self.drawn = crate::touch::Snapshot::take(ui.ctx());
     }

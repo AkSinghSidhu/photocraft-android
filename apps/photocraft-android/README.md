@@ -83,13 +83,18 @@ without a keyboard.
   function and its value (zoom %, angle, size, hardness). The centre is a button: a tap
   switches function without opening the large ring; the lights on the small wheel show which
   one is active.
+- **Full screen key** (always there, just above the keyboard key): enters full screen and leaves
+  it again, so full screen (which has no menu bar) never needs a keyboard to get out of. It is
+  drawn like a video player's button: corners pointing out, or pointing in and lit while in
+  full screen.
 - **Keyboard key** (always at the very bottom): opens the on-screen keyboard with no text field
   needed, and closes it when tapped again (or put the keyboard away with its own hide key; the
   pad's key, lit while the keyboard is open, goes dark). With no field focused, letters and
   numbers act as their shortcut keys (`E` picks the Eraser; with a pad key set to `Ctrl` held,
   `S` saves); in a text field it types as usual.
 - **Window › Shortcut Pad**: Show Shortcut Pad, On the Left / On the Right, and Shortcut Pad
-  Settings… (the number of keys; each key's label and shortcut, from presets or typed; which
+  Settings… (the number of keys; each key's label, colour (nine presets or any colour) and
+  shortcut, from presets or typed; which
   functions the wheel's centre cycles through; whether the large ring opens, its size
   (140–400 points) and the wheel's sensitivity (0.25×–4×); Restore Defaults). Adding keys fills them with the
   presets no key uses yet; removing takes them from the bottom. Settings are saved in the app's files directory
@@ -119,6 +124,16 @@ Multi-touch gestures, set up in **Window › Touch Input** (finger mode, palm re
 | Fingers while the pen is on or near the screen | Ignored (palm rejection); a pen touching down drops resting fingers | Off |
 | Two fingers over menus, panels and lists | Scroll them | Off |
 | One finger on a list row (Brushes, Layers, presets) | Swiping up or down scrolls the list; hold still for a moment, then drag, to reorder; a sideways drag moves a slider | |
+| A finger held still on a button, tab, panel or row (about 0.8 s) | Right-clicks it (context menus, closing panels) | Off |
+| A mouse's right button | Right-clicks | |
+
+**Pen buttons** (also in Touch Input Settings…): Pen button 1 (nearest the tip), 2 and 3 and
+the eraser end each **erase**, **right-click**, **run a shortcut** or do **nothing**. Defaults,
+as a Wacom pen on a PC: button 1 right-clicks, button 2 erases, button 3 does nothing, the
+eraser end erases. Right-click works as on a PC: press the button while the pen hovers to
+right-click under it, or hold it while touching down. Each row has a light that turns green
+while that button is pressed (or the eraser end is near), and the raw button state Android
+reports is shown beneath, for pens that number their buttons unusually.
 
 A flicked menu or list keeps gliding, whether it scrolls itself or a swipe scrolls it. A lone finger waits a tenth of a second (or until it moves)
 before it becomes the pointer, so a second finger landing with it starts a gesture instead of a
