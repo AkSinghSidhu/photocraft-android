@@ -270,11 +270,10 @@ OpenRaster import, export settings, preferences, brush presets.
 | Area | State on Android |
 |---|---|
 | On-screen keyboard | Typing works (see above), but the keyboard covers the lower half of the screen without resizing the UI (including the pad's keyboard key: use the keyboard's own hide key). Shortcuts with modifiers need a hardware keyboard or a pad key holding the modifier. Typing on a Type layer on the canvas is untested. |
-| Touch gestures | See [Touch Input](#touch-input). Palm rejection relies on the pen being seen (touching, or hovering on pens that report hover): a palm landing well before the pen comes near counts as a finger until the pen touches down. Gestures were tested on the emulator with injected multi-touch, not yet on real hardware. |
+| Touch gestures | See [Touch Input](#touch-input). Palm rejection relies on the pen being seen (touching, or hovering on pens that report hover): a palm landing well before the pen comes near counts as a finger until the pen touches down. |
 | Pen hover | Hover moves are not forwarded by winit 0.30: no brush cursor preview while hovering. The eraser end switches tools on contact, not on proximity, so the first eraser-end touch after flipping still uses the previous tool for that stroke. |
 | Barrel rotation | Android has no standard axis for it: rotation stays 0 (Wacom Art Pen rotation is not read). |
-| Pen buttons | Barrel buttons are not mapped to shortcuts. |
-| UI density | The desktop (Photoshop-like) layout is used unchanged; on small tablets panels are dense. |
+| UI density | Tablets use the desktop (Photoshop-like) layout; on small tablets panels are dense. Phones get the [phone layout](#phone-layout), but tools and the options bar are still the desktop ones. |
 | Clipboard images, screen color picker, display ICC profiles | Not available (no Android services wired). |
 | Crash-recovery autosave | Not wired; save often. |
 | TCP control server / MCP | Not available. |
