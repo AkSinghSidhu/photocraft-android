@@ -860,6 +860,17 @@ pub struct PhotocraftApp {
     /// `jobs_ui`). The desktop app turns it on; off (the default), everything runs inline as
     /// before, which tests and scripts rely on.
     pub background_jobs: bool,
+    /// The phone layout (the Android app turns it on for small screens): Auto interface scale
+    /// is smaller ([`prefs_ui::COMPACT_AUTO_SCALE`]) and dialogs take the window's width and
+    /// scroll when taller than it. Off on the desktop.
+    pub compact_layout: bool,
+    /// The phone layout's open panel group: the dock is only its icon rail there, and a rail
+    /// button opens its group over the canvas (see `panels::phone_dock`).
+    pub phone_panel: Option<dock::Group>,
+    /// Full screen keeps the tool bar and the options bar (the first step of the Android
+    /// Shortcut Pad's full screen key).
+    /// Cleared whenever the screen mode is back to standard.
+    pub full_screen_toolbar: bool,
     /// Shortest time between frames (ms), or `None` for no cap. A present mode that doesn't wait
     /// for the display (Low-Latency Drawing) would otherwise redraw as fast as it can while
     /// anything keeps requesting repaints (a drag hovering, autoscroll, Liquify held still).
@@ -1004,6 +1015,9 @@ impl PhotocraftApp {
             allow_close: false,
             stylus: Default::default(),
             background_jobs: false,
+            compact_layout: false,
+            phone_panel: None,
+            full_screen_toolbar: false,
             min_frame_ms: None,
             last_frame_start_ms: 0.0,
             jobs: Default::default(),
@@ -2067,16 +2081,19 @@ impl eframe::App for PhotocraftApp {
         // system title bar this is where the document name lives, as the in-app title is hidden.
         panels::sync_window_title(self, &ctx);
         let chrome = !self.ui.view.hides_chrome();
+        if self.ui.view.screen_mode == "standard" {
+            self.full_screen_toolbar = false;
+        }
         if chrome && self.ui.panels.menu_bar {
             panels::title_bar(self, ui);
         }
-        if chrome && self.ui.panels.options_bar {
+        if (chrome || self.full_screen_toolbar) && self.ui.panels.options_bar {
             panels::options_bar(self, ui);
         }
         if chrome && self.ui.panels.status_bar {
             panels::status_bar(self, ui);
         }
-        if chrome && self.ui.panels.toolbar {
+        if (chrome || self.full_screen_toolbar) && self.ui.panels.toolbar {
             panels::toolbar(self, ui);
         }
         if chrome && self.ui.panels.dock {
@@ -2874,6 +2891,8 @@ mod stamp_tests;
 
 #[cfg(test)]
 mod alt_click_tests;
+#[cfg(test)]
+mod phone_dock_tests;
 #[cfg(test)]
 mod status_bar_tests;
 #[cfg(test)]

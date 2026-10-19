@@ -20,7 +20,8 @@
 //!   finger swiping up or down on a draggable row or slider in a scrolling list (the Brushes,
 //!   Layers and preset lists, whose rows reorder when dragged) scrolls the list too; holding
 //!   still first ([`LONG_PRESS`]) then dragging reorders, and a sideways drag moves a slider.
-//!   A scroll keeps gliding after the fingers lift.
+//!   A scroll keeps gliding after the fingers lift. A sideways swipe on a strip that scrolls
+//!   sideways (the options bar, when wider than the window) scrolls it the same way.
 //! - A finger held still on the interface right-clicks (egui's press-and-hold, which needs the
 //!   finger's touch events: the router passes on the pointer finger's, without its contact-size
 //!   "force", which would read as a pen). A mouse's right button, and a pen whose side button is
@@ -34,8 +35,9 @@
 use crate::touch::config::{FingerMode, TouchConfig};
 use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchId, TouchPhase, Vec2, pos2, vec2};
 
-/// The pad's width in points.
+/// The pad's width in points, and in the phone layout.
 pub const WIDTH: f32 = 72.0;
+pub const COMPACT_WIDTH: f32 = 56.0;
 const MARGIN: f32 = 6.0;
 /// A key's height when the pad has room; keys shrink evenly towards [`MIN_KEY_H`] to fit.
 const KEY_H: f32 = 44.0;
@@ -180,6 +182,9 @@ pub struct Env<'a> {
     /// Whether a pen or mouse touch presses the secondary button (a mouse's right button, a pen's
     /// side button set to right-click).
     pub secondary: &'a dyn Fn(TouchId) -> bool,
+    /// A strip that scrolls sideways (the options bar running past the window's width), as laid
+    /// out last frame: a sideways swipe there scrolls it.
+    pub scroll_strip: Option<Rect>,
     /// The frame's time, in seconds.
     pub now: f64,
 }
@@ -233,6 +238,9 @@ struct Hold {
     since: f64,
     /// On a list row: a vertical swipe scrolls, and grabbing needs [`LONG_PRESS`].
     list: bool,
+    /// On a sideways-scrolling strip: a sideways swipe scrolls, and grabbing needs
+    /// [`LONG_PRESS`].
+    strip: bool,
 }
 
 /// A scroll gliding on after the fingers lifted (under the pointer, left where they lifted).
@@ -271,6 +279,8 @@ pub struct Router {
     /// Fingers scrolling the interface (two anywhere, or one swiping a list): their last centre,
     /// and recent centres with their times (for the glide).
     scroll: Option<Pos2>,
+    /// The axes the scroll moves (a strip scrolls only sideways).
+    scroll_axes: Vec2,
     trail: Vec<(f64, Pos2)>,
     glide: Option<Glide>,
     /// The previous frame's time (the glide's step).
@@ -382,7 +392,7 @@ impl Router {
         }
         // A finger held long enough without a second one becomes the pointer.
         if let Some(h) = self.hold
-            && env.now - h.since >= if h.list { LONG_PRESS } else { HOLD_TIME }
+            && env.now - h.since >= if h.list || h.strip { LONG_PRESS } else { HOLD_TIME }
         {
             self.commit(&mut out);
         }
@@ -434,7 +444,8 @@ impl Router {
             Role::Ui => {
                 let others: Vec<TouchId> = self.fingers.iter().filter(|f| f.role == Role::Ui && f.id != id).map(|f| f.id).collect();
                 if others.is_empty() && self.primary.is_none() && self.hold.is_none() {
-                    self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: (env.list_item)(pos) });
+                    let strip = env.scroll_strip.is_some_and(|r| r.contains(pos));
+                    self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: !strip && (env.list_item)(pos), strip });
                     if env.config.long_press_right_click {
                         let t = unforced(e, TouchPhase::Start);
                         out.push(Routed::App(t.clone()));
@@ -446,6 +457,7 @@ impl Router {
                     self.unforward(out);
                     let c = self.center(Role::Ui);
                     self.scroll = Some(c);
+                    self.scroll_axes = vec2(1.0, 1.0);
                     self.trail = vec![(env.now, c)];
                     out.push(Routed::App(Event::PointerMoved(c)));
                 }
@@ -456,7 +468,7 @@ impl Router {
                     self.sequence = Some(Sequence { since: env.now, most: 1, moved: false, gestured: false });
                     self.locked = false;
                     if env.config.finger == FingerMode::Draw && self.primary.is_none() && self.hold.is_none() {
-                        self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: false });
+                        self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: false, strip: false });
                     }
                 } else {
                     // A second finger: a gesture, not a stroke. A finger that had already become
@@ -500,11 +512,14 @@ impl Router {
                 return;
             }
             let d = pos - h.start;
-            if !(h.list && d.y.abs() > d.x.abs()) {
+            let along_list = h.list && d.y.abs() > d.x.abs();
+            let along_strip = h.strip && d.x.abs() > d.y.abs();
+            if !(along_list || along_strip) {
                 self.commit(out);
                 return;
             }
-            // A swipe along a list scrolls it; nothing is grabbed.
+            // A swipe along a list or strip scrolls it; nothing is grabbed.
+            self.scroll_axes = if along_strip { vec2(1.0, 0.0) } else { vec2(1.0, 1.0) };
             let start = h.start;
             self.hold = None;
             self.unforward(out);
@@ -523,7 +538,7 @@ impl Router {
                     out.push(Routed::App(Event::PointerMoved(c)));
                     out.push(Routed::App(Event::MouseWheel {
                         unit: MouseWheelUnit::Point,
-                        delta: c - last,
+                        delta: (c - last) * self.scroll_axes,
                         phase: TouchPhase::Move,
                         modifiers: Modifiers::NONE,
                     }));
@@ -577,7 +592,7 @@ impl Router {
                     // Lifted mid-scroll: keep gliding at the fingers' speed.
                     self.scroll = None;
                     let velocity = match (self.trail.first(), self.trail.last()) {
-                        (Some((t0, p0)), Some((t1, p1))) if t1 - t0 > 0.01 => (*p1 - *p0) / (t1 - t0) as f32,
+                        (Some((t0, p0)), Some((t1, p1))) if t1 - t0 > 0.01 => (*p1 - *p0) / (t1 - t0) as f32 * self.scroll_axes,
                         _ => Vec2::ZERO,
                     };
                     self.trail.clear();
@@ -766,6 +781,8 @@ mod tests {
     }
 
     const CANVAS: Rect = Rect { min: pos2(100.0, 50.0), max: pos2(900.0, 750.0) };
+    /// A sideways-scrolling strip above the canvas (an options bar wider than the window).
+    const STRIP: Rect = Rect { min: pos2(100.0, 10.0), max: pos2(900.0, 40.0) };
     /// A scrolling list of draggable rows (outside the canvas and the pad).
     const LIST: Rect = Rect { min: pos2(920.0, 100.0), max: pos2(990.0, 600.0) };
 
@@ -792,6 +809,7 @@ mod tests {
                 config: &self.config,
                 list_item: &list,
                 secondary: &|id: TouchId| id.0 >= 200,
+                scroll_strip: Some(STRIP),
                 now: self.now,
             };
             self.r.route(events, pad, covered, &env)
@@ -1241,5 +1259,27 @@ mod tests {
         let out = g.send(vec![touch(100, TouchPhase::Start, p)]);
         assert_eq!(presses(&out), [true]);
         assert!(app_events(&out).iter().any(|e| matches!(e, Event::PointerButton { button: PointerButton::Primary, .. })));
+    }
+
+    #[test]
+    fn a_sideways_swipe_scrolls_a_strip_and_a_hold_still_grabs() {
+        let mut g = Rig::new();
+        let p = pos2(500.0, 25.0);
+        g.send(vec![touch(1, TouchPhase::Start, p)]);
+        assert!(presses(&g.wait(HOLD_TIME + 0.01)).is_empty(), "a strip waits as long as a list row");
+        let out = g.send(vec![touch(1, TouchPhase::Move, p + vec2(-60.0, 4.0))]);
+        assert!(presses(&out).is_empty(), "nothing pressed");
+        let w = wheel(&out);
+        assert!(w.x < -40.0 && w.y == 0.0, "sideways only: {w:?}");
+        g.send(vec![touch(1, TouchPhase::End, p + vec2(-60.0, 4.0))]);
+        // Held still first, a drag works the control under the finger.
+        g.wait(2.0);
+        g.send(vec![touch(2, TouchPhase::Start, p)]);
+        assert_eq!(presses(&g.wait(LONG_PRESS + 0.01)), [true]);
+        g.send(vec![touch(2, TouchPhase::End, p)]);
+        // A tap still clicks.
+        g.wait(1.0);
+        g.send(vec![touch(3, TouchPhase::Start, p)]);
+        assert_eq!(presses(&g.send(vec![touch(3, TouchPhase::End, p)])), [true, false]);
     }
 }

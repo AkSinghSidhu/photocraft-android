@@ -55,11 +55,12 @@ fn run(android: AndroidApp) -> Result<(), String> {
             // their menu rows go to the app's menus.
             let pad = crate::pad::Pad::new(&files_dir);
             let touch = crate::touch::TouchInput::new(&files_dir);
+            let layout = crate::layout::Layout::new(&files_dir);
             let font_outcome = crate::fonts::Outcome::default();
             let wake = cc.egui_ctx.clone();
             let fonts_menu = crate::fonts::menu(&files_dir, bridge.clone(), font_outcome.clone(), move || wake.request_repaint());
             services.platform_menu =
-                Some(crate::updates::combine(vec![pad.menu(), touch.menu(), fonts_menu, crate::updates::menu(&files_dir, bridge.clone())]));
+                Some(crate::updates::combine(vec![layout.menu(), pad.menu(), touch.menu(), fonts_menu, crate::updates::menu(&files_dir, bridge.clone())]));
             crate::services::watch_incoming(bridge.clone(), inbox, cc.egui_ctx.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.background_jobs = true;
@@ -102,6 +103,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 pad,
                 font_outcome,
                 touch,
+                layout,
                 drawn: Default::default(),
             }))
         }),
@@ -130,6 +132,8 @@ struct Shell {
     font_outcome: crate::fonts::Outcome,
     /// Touch gestures and their settings (see [`crate::touch`]).
     touch: crate::touch::TouchInput,
+    /// Phone or tablet layout (see [`crate::layout`]).
+    layout: crate::layout::Layout,
     /// Where the last frame drew everything (see [`crate::touch::Snapshot`]).
     drawn: crate::touch::Snapshot,
 }
@@ -146,6 +150,10 @@ impl Shell {
 
 impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Phone or tablet, decided again every frame (rotation, a foldable opening, split screen).
+        let phone = self.layout.is_phone(ctx);
+        self.app.compact_layout = phone;
+        self.pad.compact = phone;
         self.pad.run_pending(&mut self.app, ctx);
         if let Some((message, error)) = self.font_outcome.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take() {
             self.app.ui.status = message;
@@ -251,6 +259,7 @@ impl eframe::App for Shell {
             config: &config,
             list_item: &|p: egui::Pos2| self.drawn.list_item(p),
             secondary: &secondary,
+            scroll_strip: photocraft_ui_egui::panels::options_bar_overflow(ctx),
             now: raw_input.time.unwrap_or_else(|| ctx.input(|i| i.time)),
         };
         let drawn = &self.drawn;
