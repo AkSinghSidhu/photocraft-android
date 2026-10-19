@@ -7,7 +7,7 @@
 
 <a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22ai.storyteller.photocraft%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fmorte2437%2Fphotocraft-android%22%2C%22author%22%3A%22morte2437%22%2C%22name%22%3A%22PhotoCraft%20for%20Android%22%2C%22additionalSettings%22%3A%22%7B%5C%22includePrereleases%5C%22%3A%20true%7D%22%7D"><img src="docs/images/badge-obtainium.png" alt="Get it on Obtainium" height="56"></a>
 
-<sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets and phones · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
+<sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · [How-to wiki](https://github.com/morte2437/photocraft-android/wiki) · arm64 tablets and phones · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
 
 <img src="docs/images/android-features.gif" width="720" alt="On The Great Wave off Kanagawa: a smooth red brush spiral, a two-finger pinch and twist, holding a finger on a layer for its right-click menu, the Shortcut Pad's full screen key, then the phone layout's panels sliding out and the top bar swiped sideways">
 
@@ -40,6 +40,8 @@ What the port adds:
   (Window › Shortcut Pad).
 - **Phone layout:** panels as an icon rail that slides out over the canvas, dialogs that fit
   the screen, and a swipeable options bar; on by itself on phones (Window › Layout).
+
+**How to use it:** the [wiki](https://github.com/morte2437/photocraft-android/wiki) covers every feature, step by step.
 
 Found a bug? [Report it here](https://github.com/morte2437/photocraft-android/issues/new/choose).
 
