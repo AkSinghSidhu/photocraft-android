@@ -222,6 +222,7 @@ impl Pad {
                 Routed::App(e) => out.push(e),
                 Routed::Pad(t) => self.touch(t, &mut out),
                 Routed::View(m) => self.views.push(m),
+                Routed::StripScroll(dx) => photocraft_ui_egui::panels::scroll_options_bar(ctx, dx),
                 Routed::Tap(fingers) => {
                     let shortcut = match fingers {
                         2 => &env.config.two_finger_tap,

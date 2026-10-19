@@ -912,10 +912,30 @@ fn options_bar_overflow_id() -> egui::Id {
     egui::Id::new("options-bar-overflow")
 }
 
+/// The options bar's scrolling strip as laid out last frame, when its controls run past the
+/// window's width: its rect, its scroll area's id and how far it scrolls.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Overflow {
+    rect: egui::Rect,
+    id: egui::Id,
+    max: f32,
+}
+
 /// The options bar's scrolling strip, when its controls run past the window's width (as laid
-/// out last frame): a touch screen scrolls it with a sideways swipe.
+/// out last frame): a touch screen scrolls it with a sideways swipe ([`scroll_options_bar`]).
 pub fn options_bar_overflow(ctx: &egui::Context) -> Option<egui::Rect> {
-    ctx.data(|d| d.get_temp::<Option<egui::Rect>>(options_bar_overflow_id())).flatten()
+    ctx.data(|d| d.get_temp::<Option<Overflow>>(options_bar_overflow_id())).flatten().map(|o| o.rect)
+}
+
+/// Scroll the options bar by `dx` points (positive: the content follows a finger moving right).
+/// Set on the bar's scroll area itself rather than sent as the wheel, which the dropdown under
+/// the finger would take (stepping the blend mode).
+pub fn scroll_options_bar(ctx: &egui::Context, dx: f32) {
+    let Some(o) = ctx.data(|d| d.get_temp::<Option<Overflow>>(options_bar_overflow_id())).flatten() else { return };
+    let mut state = egui::scroll_area::State::load(ctx, o.id).unwrap_or_default();
+    state.offset.x = (state.offset.x - dx).clamp(0.0, o.max.max(0.0));
+    state.store(ctx, o.id);
+    ctx.request_repaint();
 }
 
 pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
@@ -1525,8 +1545,9 @@ pub fn options_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             });
             });
             // Where a sideways swipe should scroll the bar (Android's touch router): only when it overflows.
-            let overflow = scrolled.content_size.x > scrolled.inner_rect.width() + 1.0;
-            ui.ctx().data_mut(|d| d.insert_temp(options_bar_overflow_id(), overflow.then_some(scrolled.inner_rect)));
+            let max = scrolled.content_size.x - scrolled.inner_rect.width();
+            let overflow = (max > 1.0).then_some(Overflow { rect: scrolled.inner_rect, id: scrolled.id, max });
+            ui.ctx().data_mut(|d| d.insert_temp(options_bar_overflow_id(), overflow));
         });
 }
 
