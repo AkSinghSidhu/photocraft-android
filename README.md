@@ -9,7 +9,7 @@
 
 <sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets and phones · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
 
-<img src="docs/images/android-touch-gestures.gif" width="720" alt="Pinching, twisting and panning The Great Wave off Kanagawa with two fingers, then zooming and rotating with the Shortcut Pad wheel">
+<img src="docs/images/android-features.gif" width="720" alt="On The Great Wave off Kanagawa: a smooth red brush spiral, a two-finger pinch and twist, holding a finger on a layer for its right-click menu, the Shortcut Pad's full screen key, then the phone layout's panels sliding out and the top bar swiped sideways">
 
 | 🎛️ **Shortcut Pad** | ✒️ **Real pen support** | ⌨️ **Keyboards that work** |
 |---|---|---|
