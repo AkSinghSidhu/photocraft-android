@@ -1820,7 +1820,9 @@ fn phone_dock(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
             let x = if crate::direction::is_rtl() { r.right() + 4.0 } else { r.left() - 4.0 };
             ui.painter().line_segment([pos2(x, r.top() - 8.0), pos2(x, r.bottom() + 8.0)], Stroke::new(1.0, t.separator));
             ui.spacing_mut().item_spacing.y = 6.0;
-            for (icon, name, g) in rail_entries() {
+            // Character too: there is no dock beside the canvas for it to appear in.
+            let character = ("type", tl!("Character"), crate::dock::Group::Character);
+            for (icon, name, g) in rail_entries().into_iter().chain([character]) {
                 let on = app.phone_panel == Some(g);
                 if icons::rail_button(ui, icon, rb, on, name).clicked() {
                     app.phone_panel = if on { None } else { Some(g) };
