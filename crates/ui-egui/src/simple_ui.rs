@@ -28,6 +28,13 @@ const MARGIN: f32 = 16.0;
 const BELOW_TABS: f32 = 48.0;
 /// Travel length of the right-edge sliders, in points.
 const SLIDER: f32 = 200.0;
+/// Width and height of the floating layers strip, and its row heights.
+const STRIP_W: f32 = 280.0;
+const STRIP_H: f32 = 260.0;
+const ROW: f32 = 40.0;
+/// The rows' eye cell and (groups') disclosure cell, so rows line up either way.
+const EYE_CELL: f32 = 44.0;
+const DISC_CELL: f32 = 28.0;
 
 /// The floating shell drawn over the canvas in Simple Mode, under every dialog.
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
@@ -36,6 +43,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     if app.session.active().is_some() {
         tool_rail(app, ctx);
         brush_sliders(app, ctx);
+        layers_strip(app, ctx);
     }
     tool_options(app, ctx);
 }
@@ -373,6 +381,132 @@ fn slider_draw(ui: &mut egui::Ui, track: Rect, vertical: bool, resp: egui::Respo
     changed
 }
 
+/// The floating layers strip, bottom-right (left of the slider column, clearing the corners):
+/// thumbnails, names and eyes. A tap selects, the eye hides, and + adds a layer.
+fn layers_strip(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let Some(st) = app.session.active() else { return };
+    let doc = st.doc.clone();
+    let active = st.active_layer;
+    let rows = crate::layer_tree_ui::panel_rows(app, &doc);
+    egui::Area::new(egui::Id::new("pc-simple-layers"))
+        .order(egui::Order::Middle)
+        // To the left of the size/opacity column so neither covers the other.
+        .anchor(Align2::RIGHT_BOTTOM, vec2(-(MARGIN + BUTTON + 12.0), -MARGIN))
+        .show(ctx, |ui| {
+            let t = Tokens::get(ui.ctx());
+            // The card: filled with the card colour and a border, like the app's popovers.
+            let (card, _) = ui.allocate_exact_size(vec2(STRIP_W, STRIP_H), Sense::hover());
+            ui.painter().rect_filled(card, t.radius_lg as u8, t.card);
+            ui.painter().rect_stroke(card, t.radius_lg as u8, Stroke::new(1.0, t.card_border), egui::StrokeKind::Middle);
+            ui.painter().text(pos2(card.left() + 12.0, card.top() + 22.0), Align2::LEFT_CENTER, tl!("Layers"), egui::FontId::proportional(13.0), t.text);
+            // Add a layer (the panel's +, at touch size).
+            let add_c = pos2(card.right() - 12.0 - BUTTON * 0.5, card.top() + 22.0);
+            let add = Rect::from_center_size(add_c, Vec2::splat(BUTTON));
+            let resp = ui.interact(add, ui.id().with("add"), Sense::click());
+            ui.painter().circle_filled(add_c, BUTTON * 0.5 - 1.0, if resp.hovered() { t.hover } else { t.dock });
+            ui.painter().circle_stroke(add_c, BUTTON * 0.5 - 1.0, Stroke::new(1.0, t.card_border));
+            crate::icons::paint(ui, add, "plus", (BUTTON * 0.5).round(), if resp.hovered() { t.text } else { t.icon });
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, tl!("New Layer")));
+            // The panel's +: a click adds the layer directly (the menu path opens the New Layer
+            // dialog instead).
+            if resp.clicked()
+                && let Err(e) = app.run("layer.new.layer", serde_json::json!({}))
+            {
+                app.ui.status = e;
+                app.ui.status_error = true;
+            }
+            // The rows, scrolled inside the card's list frame (group rows keep the tree order and
+            // depth of the Layers panel, through the same row source).
+            let list_rect = Rect::from_min_max(pos2(card.left() + 2.0, card.top() + 44.0), pos2(card.right() - 2.0, card.bottom() - 4.0));
+            let mut list = ui.new_child(egui::UiBuilder::new().max_rect(list_rect));
+            list.spacing_mut().item_spacing.y = 0.0;
+            egui::ScrollArea::vertical().id_salt("pc-simple-layers-list").auto_shrink([false, true]).show(&mut list, |list_ui| {
+                for &(depth, l) in &rows {
+                    strip_row(app, list_ui, ctx, &doc, depth, l, active);
+                }
+            });
+        });
+}
+
+/// One strip row: the eye at the left, a group's disclosure triangle, the thumbnail, and the
+/// name. Tapping the row (outside the eye and the triangle) selects the layer.
+fn strip_row(
+    app: &mut PhotocraftApp,
+    ui: &mut egui::Ui,
+    ctx: &egui::Context,
+    doc: &photocraft_doc::Document,
+    depth: usize,
+    l: &photocraft_doc::Layer,
+    active: Option<photocraft_doc::LayerId>,
+) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), ROW), Sense::hover());
+    if active == Some(l.id) {
+        ui.painter().rect_filled(rect, 0, t.accent_soft);
+    }
+    // The eye toggles visibility directly (Layer Properties' visible, one step).
+    let eye = Rect::from_min_size(rect.min, vec2(EYE_CELL, ROW));
+    let eye_resp = ui.interact(eye, ui.id().with(("eye", l.id.0)), Sense::click());
+    crate::icons::paint(ui, eye, if l.visible { "eye" } else { "eye-off" }, 16.0, if l.visible { t.text_dim } else { t.text_faint });
+    eye_resp
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{} {}", if l.visible { tl!("Hide") } else { tl!("Show") }, l.name)));
+    let visible = !l.visible;
+    if eye_resp.clicked()
+        && let Err(e) = crate::menus::invoke(app, ctx, "layer.setProps", serde_json::json!({"layer": l.id.0, "visible": visible}))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+    // A group's disclosure triangle (the Layers panel's, so the behaviour is the same), then
+    // the thumbnail and the name; the rest of the row selects the layer.
+    let mut x = rect.left() + EYE_CELL + depth as f32 * 8.0;
+    let mut actions: Vec<(String, serde_json::Value)> = Vec::new();
+    if crate::layer_tree_ui::disclosure(ui, rect, &mut x, l, &mut actions) {
+        for (id, p) in actions {
+            let id = if id == "layer.setExpanded" {
+                id
+            } else {
+                continue;
+            };
+            if let Err(e) = crate::menus::invoke(app, ctx, &id, p) {
+                app.ui.status = e;
+                app.ui.status_error = true;
+            }
+        }
+    } else {
+        x += DISC_CELL;
+    }
+    // The thumbnail (the layers panel's cached image), fitted in its 32 pt cell.
+    let cell = Rect::from_min_size(pos2(x + 4.0, rect.top() + 4.0), Vec2::splat(32.0));
+    let (tex, frame) = app.layer_thumb(ui.ctx(), doc, l);
+    let (fw, fh) = (frame.width() as f32, frame.height() as f32);
+    if fw > 0.0 && fh > 0.0 && cell.is_positive() {
+        let scale = (cell.width() / fw).min(cell.height() / fh);
+        let dst = Rect::from_center_size(cell.center(), vec2(fw * scale, fh * scale));
+        ui.painter().image(tex, dst, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), egui::Color32::WHITE);
+    }
+    // The name: ellipsised in what is left (thumbnails ~7 pt a glyph at this size).
+    let name_x = cell.right() + 8.0;
+    let width = (rect.right() - 10.0 - name_x).max(0.0);
+    let mut name = l.name.clone();
+    let max = (width / 7.0) as usize;
+    if name.chars().count() > max {
+        name = name.chars().take(max.saturating_sub(1)).collect::<String>() + "…";
+    }
+    let shown = name.clone();
+    ui.painter().text(pos2(name_x, rect.center().y), Align2::LEFT_CENTER, name, egui::FontId::proportional(12.0), t.text);
+    // Select: tap the row body (the eye and triangle interactions sit above it).
+    let body = Rect::from_min_max(pos2(rect.left() + EYE_CELL + DISC_CELL, rect.top()), pos2(rect.right(), rect.bottom()));
+    let sel = ui.interact(body, ui.id().with(("select", l.id.0)), Sense::click());
+    sel.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("{} {shown}", tl!("Select"))));
+    if sel.clicked()
+        && let Err(e) = crate::menus::invoke(app, ctx, "layer.select", serde_json::json!({"layer": l.id.0, "mode": "replace"}))
+    {
+        app.ui.status = e;
+        app.ui.status_error = true;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -421,6 +555,14 @@ mod tests {
         at2(rail.left() + BUTTON * 0.5, rail.top() + index as f32 * (BUTTON + 10.0) + BUTTON * 0.5)
     }
 
+    /// The centre of the layers strip's `index`th row (from the top) and, with `eye`, the row's
+    /// eye cell.
+    fn strip_row_center(ctx: &egui::Context, index: usize, eye: bool) -> egui::Pos2 {
+        let strip = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-layers"))).unwrap();
+        let x = if eye { strip.left() + EYE_CELL * 0.5 } else { strip.left() + EYE_CELL + DISC_CELL + 40.0 };
+        at2(x, strip.top() + 44.0 + index as f32 * ROW + ROW * 0.5)
+    }
+
     fn tap(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, pos: egui::Pos2) {
         let pointer = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
         frame(app, ctx, time, vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
@@ -449,11 +591,12 @@ mod tests {
         let (mut app, ctx) = app_with_doc();
         frame(&mut app, &ctx, 0.0, vec![]);
         frame(&mut app, &ctx, 0.1, vec![]);
-        // The four Phase-0 buttons (mode switch, undo, redo, save), the rail's seven tools, and
-        // the mode-switch Area's two own container widgets, which share the button's size.
-        // Pinning the census keeps the shell's floating additions visible egui-side changes land.
+        // The four Phase-0 buttons (mode switch, undo, redo, save), the rail's seven tools, the
+        // layers strip's round add button, and the mode-switch Area's two own container widgets,
+        // which share the button's size. Pinning the census keeps the shell's floating additions
+        // visible egui-side changes land.
         let rects = buttons(&ctx);
-        assert_eq!(rects.len(), 13, "4 + 7 round buttons plus the mode-switch Area's containers");
+        assert_eq!(rects.len(), 14, "11 round buttons plus the mode-switch Area's containers");
         for r in &rects {
             assert!(r.width() >= 44.0 && r.height() >= 44.0, "touch-sized: {r:?}");
             assert!(r.left() >= 0.0 && r.right() <= 1024.0 && r.top() >= 0.0 && r.bottom() <= 768.0, "on screen: {r:?}");
@@ -462,6 +605,59 @@ mod tests {
         assert!(lowest.center().x < 512.0, "the mode switch is the lowest button, bottom-left: {lowest:?}");
         let topmost = rects.iter().copied().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
         assert!(topmost.center().x > 512.0, "the undo/redo/save cluster sits right: {topmost:?}");
+    }
+
+    #[test]
+    fn the_layers_strip_selects_and_adds_a_layer() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let id0 = app.session.active().unwrap().doc.layers.last().unwrap().id.0;
+        app.run("layer.new.layer", json!({})).unwrap();
+        frame(&mut app, &ctx, 0.2, vec![]);
+        frame(&mut app, &ctx, 0.3, vec![]);
+        // The new layer is on top and active: the strip's first row selects it back to the
+        // Background below.
+        assert_ne!(app.session.active().unwrap().active_layer.map(|l| l.0), Some(id0));
+        tap(&mut app, &ctx, 1.0, strip_row_center(&ctx, 1, false));
+        frame(&mut app, &ctx, 1.15, vec![]);
+        assert_eq!(app.session.active().unwrap().active_layer.map(|l| l.0), Some(id0), "tapping a strip row selects the layer");
+        // The round + above the rows adds another layer.
+        let strip = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-layers"))).unwrap();
+        tap(&mut app, &ctx, 1.2, at2(strip.right() - 12.0 - BUTTON * 0.5, strip.top() + 22.0));
+        frame(&mut app, &ctx, 1.35, vec![]);
+        assert_eq!(app.session.active().unwrap().doc.layers.len(), 3, "+ adds a layer");
+    }
+
+    #[test]
+    fn the_layers_strip_toggles_visibility() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let id0 = app.session.active().unwrap().doc.layers.last().unwrap().id.0;
+        let visible = app.session.active().unwrap().doc.layers.last().unwrap().visible;
+        tap(&mut app, &ctx, 1.0, strip_row_center(&ctx, 0, true));
+        frame(&mut app, &ctx, 1.15, vec![]);
+        let l = app.session.active().unwrap().doc.layers.last().unwrap();
+        assert_eq!(l.id.0, id0, "the strip lists the document's stack");
+        assert_eq!(l.visible, !visible, "the row's eye toggles visibility");
+    }
+
+    #[test]
+    fn the_layers_strip_collapses_a_group() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        // Group the document's one layer: the strip lists the group and its (expanded) content.
+        app.run("layer.groupLayers", json!({})).unwrap();
+        frame(&mut app, &ctx, 0.2, vec![]);
+        frame(&mut app, &ctx, 0.3, vec![]);
+        assert_eq!(crate::layer_tree_ui::panel_rows(&app, &app.session.active().unwrap().doc).len(), 2, "the group row lists expanded, so its content row too");
+        // The triangle cell right of the eye collapses it, leaving one row.
+        let strip = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-layers"))).unwrap();
+        tap(&mut app, &ctx, 1.0, at2(strip.left() + EYE_CELL + 14.0, strip.top() + 44.0 + ROW * 0.5));
+        frame(&mut app, &ctx, 1.15, vec![]);
+        assert_eq!(crate::layer_tree_ui::panel_rows(&app, &app.session.active().unwrap().doc).len(), 1, "a collapsed group lists its row alone");
     }
 
     #[test]
