@@ -142,7 +142,8 @@ impl ViewOptions {
         self.screen_mode == "fullScreen"
     }
     pub fn hides_tabs(&self) -> bool {
-        self.screen_mode != "standard"
+        // Simple Mode has no tab strip: its documents live in the menu overlay's Documents page.
+        self.simple() || self.screen_mode != "standard"
     }
     /// Horizontal display scale of a document pixel: the pixel aspect ratio while View › Pixel
     /// Aspect Ratio Correction is on, else 1 (square). The document's pixels never change.

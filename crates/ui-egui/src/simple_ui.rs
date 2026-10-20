@@ -22,10 +22,6 @@ use crate::theme::Tokens;
 const BUTTON: f32 = 44.0;
 /// Corner margin of the floating buttons on their two outer sides.
 const MARGIN: f32 = 16.0;
-/// The tab strip rides above the canvas; the top-right cluster clears it so it never covers a
-/// tab. While Simple Mode still shows the tab strip (it hides once the menu overlay provides
-/// document switching), the floating cluster starts below it.
-const BELOW_TABS: f32 = 48.0;
 /// Travel length of the right-edge sliders, in points.
 const SLIDER: f32 = 200.0;
 /// Width and height of the floating layers strip, and its row heights.
@@ -39,6 +35,7 @@ const DISC_CELL: f32 = 28.0;
 /// The floating shell drawn over the canvas in Simple Mode, under every dialog.
 pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
     swap_button(app, ctx);
+    menu_button(ctx);
     edit_cluster(app, ctx);
     if app.session.active().is_some() {
         tool_rail(app, ctx);
@@ -46,6 +43,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         layers_strip(app, ctx);
     }
     tool_options(app, ctx);
+    menu_overlay(app, ctx);
 }
 
 /// Bottom-left: the round mode switch, back to Studio Mode.
@@ -66,18 +64,17 @@ fn edit_cluster(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let undo = app.session.is_enabled("edit.undo");
     let redo = app.session.is_enabled("edit.redo");
     let doc = app.session.active().is_some();
-    egui::Area::new(egui::Id::new("pc-simple-edit-cluster"))
-        .order(egui::Order::Middle)
-        .anchor(Align2::RIGHT_TOP, vec2(-MARGIN, MARGIN + BELOW_TABS))
-        .constrain(false)
-        .show(ctx, |ui| {
+    egui::Area::new(egui::Id::new("pc-simple-edit-cluster")).order(egui::Order::Middle).anchor(Align2::RIGHT_TOP, vec2(-MARGIN, MARGIN)).constrain(false).show(
+        ctx,
+        |ui| {
             ui.spacing_mut().item_spacing.x = 12.0;
             ui.horizontal(|ui| {
                 command_button(ui, app, ctx, undo, "undo-2", "Undo", "edit.undo");
                 command_button(ui, app, ctx, redo, "redo-2", "Redo", "edit.redo");
                 command_button(ui, app, ctx, doc, "save", "Save", "file.save");
             });
-        });
+        },
+    );
 }
 
 /// A round command button that runs a command on tap; dimmed rather than hidden when disabled,
@@ -381,8 +378,243 @@ fn slider_draw(ui: &mut egui::Ui, track: Rect, vertical: bool, resp: egui::Respo
     changed
 }
 
-/// The floating layers strip, bottom-right (left of the slider column, clearing the corners):
-/// thumbnails, names and eyes. A tap selects, the eye hides, and + adds a layer.
+/// The menu overlay's navigation: open, and which front-page entry is shown (`None` shows the
+/// front page, 0 the documents list, 1.. the menu groups).
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+struct MenuNav {
+    open: bool,
+    sub: Option<usize>,
+}
+
+/// Width of the menu overlay, and one of its rows' height.
+const MENU_W: f32 = 320.0;
+const MENU_ROW: f32 = 44.0;
+
+/// The menu overlay's navigation id (constant-like, but `Id::new` isn't const).
+fn menu_nav_id() -> egui::Id {
+    egui::Id::new("pc-simple-menu-nav")
+}
+
+/// What one overlay row is and does: a heading, the back row, a page switch (the documents, a
+/// menu group), a document to activate, or a command to invoke.
+#[derive(Debug)]
+enum MenuTap {
+    Head(String),
+    Back,
+    Documents,
+    Group(usize, String),
+    Document(usize, String, bool),
+    Command(crate::menus::MenuItem),
+}
+
+/// The row's accessibility label: the translated text the row shows.
+fn menu_row_label(tap: &MenuTap) -> String {
+    match tap {
+        MenuTap::Head(text) => tl!(text.as_str()).to_string(),
+        MenuTap::Back => tl!("Back").to_string(),
+        MenuTap::Documents => tl!("Documents").to_string(),
+        MenuTap::Group(_, g) => tl!(g.as_str()).to_string(),
+        MenuTap::Document(_, name, _) => name.clone(),
+        MenuTap::Command(item) => crate::menus::translated_menu_label(crate::i18n::current(), item),
+    }
+}
+
+/// Top-left: the menu button, always visible (also without a document, so File › New is
+/// reachable).
+fn menu_button(ctx: &egui::Context) {
+    let mut nav = ctx.data_mut(|d| d.get_temp::<MenuNav>(menu_nav_id()).unwrap_or_default());
+    egui::Area::new(egui::Id::new("pc-simple-menu-btn")).order(egui::Order::Middle).anchor(Align2::LEFT_TOP, vec2(MARGIN, MARGIN)).show(ctx, |ui| {
+        let resp = round_button(ui, "menu", tl!("Menu"), nav.open);
+        if resp.clicked() {
+            nav = MenuNav { open: !nav.open, sub: None };
+        }
+    });
+    ctx.data_mut(|d| d.insert_temp(menu_nav_id(), nav));
+}
+
+/// The overlay's rows for a level: `None` is the front page (the documents entry, then each
+/// top-level menu group), 0 the documents, 1.. one group's commands (subgroups as headings,
+/// the menus' separators skipped).
+fn menu_taps(app: &PhotocraftApp, sub: Option<usize>, items: &[crate::menus::MenuItem]) -> Vec<MenuTap> {
+    let mut groups: Vec<String> = Vec::new();
+    for item in items {
+        if let Some(grp) = item.path.first()
+            && groups.last().is_none_or(|last| last != grp)
+        {
+            groups.push(grp.clone());
+        }
+    }
+    match sub {
+        None => {
+            let mut taps = vec![MenuTap::Documents];
+            taps.extend(groups.iter().enumerate().map(|(i, g)| MenuTap::Group(i + 1, g.clone())));
+            taps
+        }
+        Some(0) => {
+            let active = app.session.active_index();
+            let mut taps = vec![MenuTap::Back];
+            taps.extend(app.session.documents().iter().enumerate().map(|(i, st)| MenuTap::Document(i, st.doc.name.clone(), Some(i) == active)));
+            taps
+        }
+        Some(k) => {
+            let mut taps = vec![MenuTap::Back];
+            if let Some(group) = groups.get(k - 1) {
+                let mut last_head: Option<&str> = None;
+                for item in items.iter().filter(|it| it.path.first() == Some(group)) {
+                    if item.label == "---" {
+                        continue; // The menus' separators don't belong in a flat list.
+                    }
+                    if item.path.len() > 1 && last_head != Some(item.path[1].as_str()) {
+                        taps.push(MenuTap::Head(item.path[1].clone()));
+                        last_head = Some(item.path[1].as_str());
+                    }
+                    taps.push(MenuTap::Command(item.clone()));
+                }
+            }
+            taps
+        }
+    }
+}
+
+/// The command overlay: its front page lists the documents and every top-level menu group,
+/// from `menus::menu_items`, so the commands are exactly the Studio bar's. A group opens its
+/// rows (subgroups as headings), a row invokes its command and closes the overlay like the
+/// menu bar would, and a tap outside the button and the card closes it.
+fn menu_overlay(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let mut nav = ctx.data_mut(|d| d.get_temp::<MenuNav>(menu_nav_id()).unwrap_or_default());
+    if !nav.open {
+        ctx.data_mut(|d| d.insert_temp(menu_nav_id(), nav));
+        return;
+    }
+    // A tap outside the button and the card closes the overlay (the tool options' rule); the
+    // rects are from the frame before, which is fine: the shell is statically anchored.
+    let btn = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu-btn")));
+    let card = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu")));
+    let (clicked, at) = ctx.input(|i| (i.pointer.any_click(), i.pointer.interact_pos()));
+    if clicked
+        && let Some(at) = at
+        && !btn.is_some_and(|b| b.contains(at))
+        && !card.is_some_and(|c| c.contains(at))
+    {
+        nav = MenuNav::default();
+        ctx.data_mut(|d| d.insert_temp(menu_nav_id(), nav));
+        return;
+    }
+    let items = crate::menus::menu_items(app);
+    let taps = menu_taps(app, nav.sub, &items);
+    egui::Area::new(egui::Id::new("pc-simple-menu")).order(egui::Order::Middle).anchor(Align2::LEFT_TOP, vec2(MARGIN, MARGIN + BUTTON + 10.0)).show(
+        ctx,
+        |ui| {
+            let t = Tokens::get(ui.ctx());
+            // The card, capped between its top offset and the bottom margin.
+            let avail = ctx.viewport_rect().height() - MARGIN * 3.0 - BUTTON - 10.0;
+            let h = (taps.len() as f32 * MENU_ROW).min(avail.max(MENU_ROW * 4.0));
+            let (card, _) = ui.allocate_exact_size(vec2(MENU_W, h), Sense::hover());
+            ui.painter().rect_filled(card, t.radius_lg as u8, t.card);
+            ui.painter().rect_stroke(card, t.radius_lg as u8, Stroke::new(1.0, t.card_border), egui::StrokeKind::Middle);
+            // The rows, scrolled; each row is one whole-row tap target.
+            let list = Rect::from_min_max(pos2(card.left() + 2.0, card.top() + 2.0), pos2(card.right() - 2.0, card.bottom() - 2.0));
+            let mut list = ui.new_child(egui::UiBuilder::new().max_rect(list).id(egui::Id::new("pc-simple-menu-upper")));
+            list.spacing_mut().item_spacing.y = 0.0;
+            egui::ScrollArea::vertical().id_salt("pc-simple-menu-list").auto_shrink([false, true]).show(&mut list, |rows_ui| {
+                for tap in taps.iter() {
+                    // Fixed width: available_width changes once between egui's first passes,
+                    // and a row that moves between press and release never sees the click. One
+                    // click-sensed allocation is the row (a second `interact` on top would
+                    // split press and release between the two widgets).
+                    let (rect, resp) = rows_ui.allocate_exact_size(vec2(MENU_W - 8.0, MENU_ROW), Sense::click());
+                    match tap {
+                        MenuTap::Head(text) => {
+                            rows_ui.painter().text(
+                                pos2(rect.left() + 16.0, rect.center().y),
+                                Align2::LEFT_CENTER,
+                                tl!(text.as_str()),
+                                egui::FontId::proportional(12.5),
+                                t.text_faint,
+                            );
+                        }
+                        _ => {
+                            let text = menu_row_label(tap);
+                            // Disabled commands dim; the rest are at body size.
+                            let dim = matches!(tap, MenuTap::Command(item) if !item.enabled);
+                            let tint = if dim { t.text_faint } else { t.text };
+                            let x = if matches!(tap, MenuTap::Back) { rect.left() + 36.0 } else { rect.left() + 16.0 };
+                            rows_ui.painter().text(pos2(x, rect.center().y), Align2::LEFT_CENTER, text, egui::FontId::proportional(13.5), tint);
+                            if matches!(tap, MenuTap::Back) {
+                                crate::icons::paint(
+                                    rows_ui,
+                                    Rect::from_center_size(pos2(rect.left() + 16.0, rect.center().y), Vec2::splat(20.0)),
+                                    "chevron-left",
+                                    16.0,
+                                    t.icon,
+                                );
+                            }
+                            // The trailing icon: a chevron for pages, a check for checked
+                            // commands and the active document, else nothing.
+                            let mut tick: Option<(&'static str, bool)> = None;
+                            match tap {
+                                MenuTap::Documents | MenuTap::Group(..) => tick = Some(("chevron-right", false)),
+                                MenuTap::Document(.., is_active) => {
+                                    if *is_active {
+                                        tick = Some(("check", true));
+                                    }
+                                }
+                                MenuTap::Command(item) if item.checked == Some(true) => tick = Some(("check", true)),
+                                _ => {}
+                            }
+                            if let Some((icon, check)) = tick {
+                                crate::icons::paint(
+                                    rows_ui,
+                                    Rect::from_center_size(pos2(rect.right() - 22.0, rect.center().y), Vec2::splat(20.0)),
+                                    icon,
+                                    16.0,
+                                    if check { t.accent_border } else { t.icon },
+                                );
+                            }
+                            if let MenuTap::Command(item) = tap
+                                && let Some(shortcut) = &item.shortcut
+                            {
+                                let x = rect.right() - if tick.is_some() { 44.0 } else { 16.0 };
+                                rows_ui.painter().text(
+                                    pos2(x, rect.center().y),
+                                    Align2::RIGHT_CENTER,
+                                    shortcut.clone(),
+                                    egui::FontId::proportional(11.5),
+                                    t.text_faint,
+                                );
+                            }
+                        }
+                    }
+                    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, menu_row_label(tap)));
+                    if resp.clicked() {
+                        match tap {
+                            MenuTap::Documents => nav.sub = Some(0),
+                            MenuTap::Group(k, _) => nav.sub = Some(*k),
+                            MenuTap::Back => nav.sub = None,
+                            MenuTap::Document(idx, _, _) => {
+                                if let Err(e) = crate::menus::invoke(app, ctx, "document.activate", serde_json::json!({"document": *idx})) {
+                                    app.ui.status = e;
+                                    app.ui.status_error = true;
+                                }
+                                nav = MenuNav::default();
+                            }
+                            MenuTap::Command(item) if item.enabled => {
+                                if let Err(e) = crate::menus::invoke(app, ctx, &item.id, serde_json::json!({})) {
+                                    app.ui.status = e;
+                                    app.ui.status_error = true;
+                                }
+                                nav = MenuNav::default();
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+            });
+        },
+    );
+    ctx.data_mut(|d| d.insert_temp(menu_nav_id(), nav));
+}
+
 fn layers_strip(app: &mut PhotocraftApp, ctx: &egui::Context) {
     let Some(st) = app.session.active() else { return };
     let doc = st.doc.clone();
@@ -516,10 +748,15 @@ mod tests {
     /// Draw only the floating shell (as ui() does over the canvas in Simple Mode), so the
     /// widget rects under test are ours alone.
     fn frame(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, events: Vec<egui::Event>) {
-        let mut out = ctx.run_ui(
-            egui::RawInput { time: Some(time), events, screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1024.0, 768.0))), ..Default::default() },
-            |ui| show(app, ui.ctx()),
-        );
+        frame_size(app, ctx, time, events, vec2(1024.0, 768.0));
+    }
+
+    /// [`frame`] at another `size` (the overlay lists the whole menu on a tall screen).
+    fn frame_size(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, events: Vec<egui::Event>, size: egui::Vec2) {
+        let mut out = ctx
+            .run_ui(egui::RawInput { time: Some(time), events, screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, size)), ..Default::default() }, |ui| {
+                show(app, ui.ctx())
+            });
         out.textures_delta.clear();
     }
 
@@ -563,11 +800,31 @@ mod tests {
         at2(x, strip.top() + 44.0 + index as f32 * ROW + ROW * 0.5)
     }
 
+    /// The menu button's centre, and (with the overlay open) the `index`th row's centre: rows
+    /// start 2 pt into the card and each is `MENU_ROW` tall.
+    fn menu_row(ctx: &egui::Context, index: usize, overlay: bool) -> egui::Pos2 {
+        if !overlay {
+            let btn = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu-btn"))).unwrap();
+            return btn.center();
+        }
+        let menu = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu"))).unwrap();
+        at2(menu.left() + MENU_W * 0.5, menu.top() + 2.0 + index as f32 * MENU_ROW + MENU_ROW * 0.5)
+    }
+
     fn tap(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, pos: egui::Pos2) {
+        tap_size(app, ctx, time, pos, vec2(1024.0, 768.0));
+    }
+
+    /// [`tap`] at another `size`, so a tap keeps its layout between press and release.
+    fn tap_size(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, pos: egui::Pos2, size: egui::Vec2) {
         let pointer = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
-        frame(app, ctx, time, vec![egui::Event::PointerMoved(pos), pointer(pos, true)]);
-        frame(app, ctx, time + 0.05, vec![pointer(pos, false)]);
-        frame(app, ctx, time + 0.1, vec![]);
+        // The move in its own pass first (kittest's order): a pointer that moves and presses in
+        // one batch presses before the row has ever been hovered, and egui hands the press to
+        // the widget it knew about last; the row then never sees the click.
+        frame_size(app, ctx, time, vec![egui::Event::PointerMoved(pos)], size);
+        frame_size(app, ctx, time + 0.01, vec![pointer(pos, true)], size);
+        frame_size(app, ctx, time + 0.05, vec![pointer(pos, false)], size);
+        frame_size(app, ctx, time + 0.1, vec![], size);
     }
 
     #[test]
@@ -591,12 +848,15 @@ mod tests {
         let (mut app, ctx) = app_with_doc();
         frame(&mut app, &ctx, 0.0, vec![]);
         frame(&mut app, &ctx, 0.1, vec![]);
-        // The four Phase-0 buttons (mode switch, undo, redo, save), the rail's seven tools, the
-        // layers strip's round add button, and the mode-switch Area's two own container widgets,
-        // which share the button's size. Pinning the census keeps the shell's floating additions
-        // visible egui-side changes land.
+        // The four Phase-0 buttons (mode switch, undo, redo, save), the menu button, the rail's
+        // seven tools, the layers strip's round add button, and the button Areas' own container
+        // widgets (two each for the mode switch and the menu button), which share the buttons'
+        // size. Pinning the census keeps the shell's floating additions visible when egui-side
+        // changes land.
         let rects = buttons(&ctx);
-        assert_eq!(rects.len(), 14, "11 round buttons plus the mode-switch Area's containers");
+        // 13 round buttons (4 Phase-0, the menu button, the rail's seven, the strip's +) and the
+        // button Areas' four own container widgets, which share the buttons' size.
+        assert_eq!(rects.len(), 17, "13 round buttons plus the button Areas' containers");
         for r in &rects {
             assert!(r.width() >= 44.0 && r.height() >= 44.0, "touch-sized: {r:?}");
             assert!(r.left() >= 0.0 && r.right() <= 1024.0 && r.top() >= 0.0 && r.bottom() <= 768.0, "on screen: {r:?}");
@@ -604,7 +864,9 @@ mod tests {
         let lowest = rects.iter().copied().max_by(|a, b| a.bottom().total_cmp(&b.bottom())).unwrap();
         assert!(lowest.center().x < 512.0, "the mode switch is the lowest button, bottom-left: {lowest:?}");
         let topmost = rects.iter().copied().min_by(|a, b| a.top().total_cmp(&b.top())).unwrap();
-        assert!(topmost.center().x > 512.0, "the undo/redo/save cluster sits right: {topmost:?}");
+        // The tab strip is hidden in Simple Mode: the menu button (left) and the undo/redo/save
+        // cluster (right) both start at the top margin.
+        assert_eq!(topmost.top(), MARGIN, "the top row starts at the margin: {topmost:?}");
     }
 
     #[test]
@@ -641,6 +903,95 @@ mod tests {
         let l = app.session.active().unwrap().doc.layers.last().unwrap();
         assert_eq!(l.id.0, id0, "the strip lists the document's stack");
         assert_eq!(l.visible, !visible, "the row's eye toggles visibility");
+    }
+
+    #[test]
+    fn the_menu_overlay_opens_and_a_tap_outside_closes_it() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        // The button is open at touch size, even on a document-less front page once closed.
+        ctx.data_mut(|d| d.insert_temp(menu_nav_id(), MenuNav { open: true, sub: None }));
+        frame(&mut app, &ctx, 0.2, vec![]);
+        assert!(ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu"))).is_some(), "the overlay draws once open");
+        tap(&mut app, &ctx, 1.0, at2(512.0, 300.0));
+        frame(&mut app, &ctx, 1.15, vec![]);
+        assert!(!ctx.data(|d| d.get_temp::<MenuNav>(menu_nav_id()).unwrap_or_default()).open, "a tap outside closes the overlay");
+        // And the button reopens it from anywhere.
+        tap(&mut app, &ctx, 1.2, menu_row(&ctx, 0, false));
+        frame(&mut app, &ctx, 1.35, vec![]);
+        assert!(ctx.data(|d| d.get_temp::<MenuNav>(menu_nav_id()).unwrap_or_default()).open);
+    }
+
+    #[test]
+    fn the_menu_overlay_switches_documents() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        app.run("file.new", json!({"width": 900, "height": 600})).unwrap();
+        frame(&mut app, &ctx, 0.2, vec![]);
+        frame(&mut app, &ctx, 0.3, vec![]);
+        let before = app.session.active_index().unwrap();
+        // Open the overlay, show the documents page and pick the other document.
+        ctx.data_mut(|d| d.insert_temp(menu_nav_id(), MenuNav { open: true, sub: None }));
+        frame(&mut app, &ctx, 0.4, vec![]);
+        tap(&mut app, &ctx, 1.0, menu_row(&ctx, 0, true));
+        frame(&mut app, &ctx, 1.15, vec![]);
+        let other = if before == 0 { 1 } else { 0 };
+        tap(&mut app, &ctx, 1.2, menu_row(&ctx, other + 1, true));
+        frame(&mut app, &ctx, 1.35, vec![]);
+        assert_eq!(app.session.active_index(), Some(other), "the documents page activates the other document");
+        let nav = ctx.data(|d| d.get_temp::<MenuNav>(menu_nav_id()).unwrap_or_default());
+        assert!(!nav.open, "activating a document closes the overlay");
+    }
+
+    #[test]
+    fn the_menu_overlay_can_return_to_studio_mode() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        // The front page's View group, from the same row source the overlay draws.
+        let taps = menu_taps(&app, None, &crate::menus::menu_items(&app));
+        let view = taps.iter().position(|t| matches!(t, MenuTap::Group(_, g) if g == "View")).unwrap();
+        ctx.data_mut(|d| d.insert_temp(menu_nav_id(), MenuNav { open: true, sub: None }));
+        frame(&mut app, &ctx, 0.2, vec![]);
+        tap(&mut app, &ctx, 1.0, menu_row(&ctx, view, true));
+        // The View page is long (84 rows): this test continues on a tall viewport where the
+        // whole page shows at once, and taps the last row, which is the Studio Mode row.
+        let size = vec2(1024.0, 4200.0);
+        frame_size(&mut app, &ctx, 1.2, vec![], size);
+        let card = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu"))).unwrap();
+        let row = ctx
+            .viewport(|v| {
+                let mut rows: Vec<f32> = v
+                    .prev_pass
+                    .widgets
+                    .layers()
+                    .flat_map(|(_, w)| w.iter())
+                    .filter(|w| (w.rect.width() - (MENU_W - 8.0)).abs() < 0.01 && (w.rect.height() - MENU_ROW).abs() < 0.01)
+                    .map(|w| w.rect.bottom())
+                    .collect();
+                rows.sort_by(|a, b| a.total_cmp(b));
+                rows.pop()
+            })
+            .unwrap();
+        assert!((row - (card.bottom() + 2.0)).abs() < 2.0, "the tall screen shows the list's bottom row: {row} vs {card:?}");
+        tap_size(&mut app, &ctx, 3.0, at2(card.left() + 160.0, row - MENU_ROW * 0.5), size);
+        frame_size(&mut app, &ctx, 3.15, vec![], size);
+        assert!(!app.ui.view.simple(), "the overlay's Studio Mode row returns to Studio Mode");
+        assert!(app.session.active().is_some(), "the document stays open");
+    }
+
+    #[test]
+    fn the_undo_cluster_clears_the_canvas_top_without_the_tab_strip() {
+        let (mut app, ctx) = app_with_doc();
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        // The tab strip is gone in Simple Mode: the floating cluster starts at the top margin.
+        let cluster = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-edit-cluster"))).unwrap();
+        assert_eq!(cluster.top(), MARGIN, "the cluster clears the (hidden) tab strip's former row");
+        let simple_tabs = app.ui.view.hides_tabs();
+        assert!(simple_tabs, "Simple Mode hides the tab strip");
     }
 
     #[test]
