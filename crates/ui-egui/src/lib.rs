@@ -482,6 +482,10 @@ pub struct Services {
     pub system_theme: Option<SystemThemeFn>,
     /// The native window is connected directly to a Wayland compositor.
     pub is_wayland: bool,
+    /// This device's input is finger/stylus touch (Android tablets): where the desktop UI
+    /// shows pointer-only affordances (the toolbar's Screen Mode slot), touch-first ones may
+    /// replace them. Set by the Android app; false on desktop and in tests.
+    pub touch: bool,
     /// On Wayland, the shell command that starts this install under XWayland, where native file
     /// drops work (#386); `None` when there is no X server to run it on.
     pub xwayland_command: Option<String>,

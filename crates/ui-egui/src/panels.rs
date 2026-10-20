@@ -314,52 +314,64 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                     {
                         let _ = crate::menus::invoke(app, &ctx, "select.editInQuickMaskMode", json!({}));
                     }
-                    let sm = icons::button_with_icon_size_tip(ui, "app-window", bx, (bx * 0.52).round(), false, tl!("Change Screen Mode  (F)"), tool_tips);
-                    paint_toolbar_flyout_indicator(ui, &t, &sm);
-
-                    // Right-click, or click and hold like the tool flyouts (#4444), lists the modes,
-                    // like Photoshop's flyout. The release that ends a hold doesn't cycle the mode.
-                    let held_id = sm.id.with("held");
-                    let was_held = ui.data(|d| d.get_temp::<bool>(held_id)).unwrap_or(false);
-                    let held_for = sm.is_pointer_button_down_on().then(|| ui.input(|i| i.pointer.press_start_time().map(|t0| i.time - t0))).flatten();
-                    if let Some(seconds) = held_for
-                        && seconds < 0.35
-                    {
-                        ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(0.35 - seconds));
-                    }
-                    let long_press = !was_held && held_for.is_some_and(|seconds| seconds >= 0.35);
-                    if long_press {
-                        ui.data_mut(|d| d.insert_temp(held_id, true));
-                    } else if was_held && !sm.is_pointer_button_down_on() {
-                        ui.data_mut(|d| d.remove::<bool>(held_id));
-                    }
-                    let cycle = sm.clicked() && !was_held;
-                    if cycle {
-                        let _ = crate::menus::invoke(app, &ctx, "view.screenMode.cycle", json!({}));
-                    }
-                    let open = if sm.secondary_clicked() || long_press {
-                        Some(egui::SetOpenCommand::Bool(true))
-                    } else if cycle {
-                        Some(egui::SetOpenCommand::Bool(false))
+                    // Desktop keeps Photoshop's Screen Mode slot; on touch platforms (Android
+                    // tablets) the slot is the entry into Simple Mode instead.
+                    let sm = if !app.services.touch {
+                        icons::button_with_icon_size_tip(ui, "app-window", bx, (bx * 0.52).round(), false, tl!("Change Screen Mode  (F)"), tool_tips)
                     } else {
-                        None
+                        icons::button_with_icon_size_tip(ui, "arrow-left-right", bx, (bx * 0.52).round(), false, tl!("Switch to Simple Mode"), tool_tips)
                     };
-                    // The release ending the hold counts as a click; it mustn't close the list it opened.
-                    let close = if was_held || long_press { egui::PopupCloseBehavior::IgnoreClicks } else { egui::PopupCloseBehavior::CloseOnClick };
-                    egui::Popup::menu(&sm).open_memory(open).close_behavior(close).at_pointer_fixed().show(|ui| {
-                        ui.set_min_width(220.0);
-                        for (id, label) in [
-                            ("view.screenMode.standard", tl!("Standard Screen Mode")),
-                            ("view.screenMode.fullScreenWithMenuBar", tl!("Full Screen Mode With Menu Bar")),
-                            ("view.screenMode.fullScreen", tl!("Full Screen Mode")),
-                        ] {
-                            let on = crate::view_cmds::checked(app, id).unwrap_or(false);
-                            if ui.add(egui::Button::selectable(on, label)).clicked() {
-                                let _ = crate::menus::invoke(app, &ctx, id, json!({}));
-                                ui.close();
-                            }
+                    if app.services.touch {
+                        if sm.clicked() {
+                            let _ = crate::menus::invoke(app, &ctx, "view.uiMode.simple", json!({}));
                         }
-                    });
+                    } else {
+                        paint_toolbar_flyout_indicator(ui, &t, &sm);
+
+                        // Right-click, or click and hold like the tool flyouts (#4444), lists the modes,
+                        // like Photoshop's flyout. The release that ends a hold doesn't cycle the mode.
+                        let held_id = sm.id.with("held");
+                        let was_held = ui.data(|d| d.get_temp::<bool>(held_id)).unwrap_or(false);
+                        let held_for = sm.is_pointer_button_down_on().then(|| ui.input(|i| i.pointer.press_start_time().map(|t0| i.time - t0))).flatten();
+                        if let Some(seconds) = held_for
+                            && seconds < 0.35
+                        {
+                            ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(0.35 - seconds));
+                        }
+                        let long_press = !was_held && held_for.is_some_and(|seconds| seconds >= 0.35);
+                        if long_press {
+                            ui.data_mut(|d| d.insert_temp(held_id, true));
+                        } else if was_held && !sm.is_pointer_button_down_on() {
+                            ui.data_mut(|d| d.remove::<bool>(held_id));
+                        }
+                        let cycle = sm.clicked() && !was_held;
+                        if cycle {
+                            let _ = crate::menus::invoke(app, &ctx, "view.screenMode.cycle", json!({}));
+                        }
+                        let open = if sm.secondary_clicked() || long_press {
+                            Some(egui::SetOpenCommand::Bool(true))
+                        } else if cycle {
+                            Some(egui::SetOpenCommand::Bool(false))
+                        } else {
+                            None
+                        };
+                        // The release ending the hold counts as a click; it mustn't close the list it opened.
+                        let close = if was_held || long_press { egui::PopupCloseBehavior::IgnoreClicks } else { egui::PopupCloseBehavior::CloseOnClick };
+                        egui::Popup::menu(&sm).open_memory(open).close_behavior(close).at_pointer_fixed().show(|ui| {
+                            ui.set_min_width(220.0);
+                            for (id, label) in [
+                                ("view.screenMode.standard", tl!("Standard Screen Mode")),
+                                ("view.screenMode.fullScreenWithMenuBar", tl!("Full Screen Mode With Menu Bar")),
+                                ("view.screenMode.fullScreen", tl!("Full Screen Mode")),
+                            ] {
+                                let on = crate::view_cmds::checked(app, id).unwrap_or(false);
+                                if ui.add(egui::Button::selectable(on, label)).clicked() {
+                                    let _ = crate::menus::invoke(app, &ctx, id, json!({}));
+                                    ui.close();
+                                }
+                            }
+                        });
+                    }
                 });
             }
         });
@@ -5199,6 +5211,39 @@ mod type_flyout_tests {
         frame(&mut app, &ctx, 4.05, vec![secondary(false)]);
         frame(&mut app, &ctx, 4.1, vec![]);
         assert!(menu_open(&ctx));
+    }
+
+    /// Touch platforms replace the Screen Mode slot with the entry into Simple Mode (the
+    /// Android tablet's toolbar); the desktop keeps Photoshop's slot (the long-press test above
+    /// runs on the default, non-touch services).
+    #[test]
+    fn on_touch_the_screen_mode_slot_switches_to_simple_mode() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+        app.services.touch = true;
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let bx = if Tokens::get(&ctx).pro { 30.0 } else { 36.0 };
+        // The toolbar's last button-sized clickable: the swapped slot (after Quick Mask).
+        let at = ctx
+            .viewport(|v| {
+                v.prev_pass
+                    .widgets
+                    .layers()
+                    .flat_map(|(_, w)| w.iter())
+                    .filter(|w| w.rect.size() == egui::Vec2::splat(bx) && w.sense.senses_click())
+                    .map(|w| w.rect)
+                    .max_by(|a, b| a.top().total_cmp(&b.top()).then(a.left().total_cmp(&b.left())))
+            })
+            .unwrap()
+            .center();
+        let pointer = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        frame(&mut app, &ctx, 1.0, vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+        frame(&mut app, &ctx, 1.1, vec![pointer(at, false)]);
+        frame(&mut app, &ctx, 1.15, vec![]);
+        assert!(app.ui.view.simple(), "tapping the swapped slot enters Simple Mode");
+        assert_eq!(crate::view_cmds::checked(&app, "view.screenMode.standard"), Some(true), "the screen mode is untouched");
     }
 
     /// Every text drawn in one toolbar frame.

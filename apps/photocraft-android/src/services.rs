@@ -51,6 +51,7 @@ pub fn services(bridge: Arc<Bridge>, files_dir: &Path) -> Services {
             let mut f = std::fs::OpenOptions::new().create(true).append(true).open(path).map_err(|e| e.to_string())?;
             f.write_all(text.as_bytes()).map_err(|e| e.to_string())
         })),
+        touch: true,
         // File › Exit: the Activity finishes and ends the process (see `bridge`), instead of
         // eframe stopping its event loop, which on Android only happens on the next input event
         // and leaves a process that can't start the app again.
