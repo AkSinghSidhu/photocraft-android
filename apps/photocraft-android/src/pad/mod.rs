@@ -402,7 +402,9 @@ impl Pad {
     pub fn show(&mut self, ui: &mut egui::Ui, tk: &Tokens, app: &PhotocraftApp) {
         self.screen = ui.ctx().content_rect();
         let config = self.shared.borrow().config.clone();
-        if !config.enabled {
+        // Simple Mode has its own touch shell at the edges; the pad would sit under it
+        // (its sliders), so hide the pad there and let the canvas use the full width.
+        if !config.enabled || app.ui.view.simple() {
             self.layout = None;
             return;
         }
