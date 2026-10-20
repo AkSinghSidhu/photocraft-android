@@ -150,6 +150,25 @@ fn main() {
         harness.event(egui::Event::PointerButton { pos, button, pressed: false, modifiers: egui::Modifiers::NONE });
         harness.run_steps(4);
     }
+    // A double tap/click (two presses within the double-click window), to open things like the
+    // Simple Mode tool options. The steps carry explicit times: egui_kittest's default step
+    // dt (¼ s) is wider than the double-click window.
+    if let Some((x, y)) =
+        arg(&args, "--double-click-at").and_then(|s| s.split_once(',').and_then(|(x, y)| Some((x.parse::<f32>().ok()?, y.parse::<f32>().ok()?))))
+    {
+        let pos = egui::pos2(x, y);
+        harness.event(egui::Event::PointerMoved(pos));
+        harness.step();
+        for _ in 0..2 {
+            harness.input_mut().time = Some(10.0);
+            harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+            harness.step();
+            harness.input_mut().time = Some(10.05);
+            harness.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+            harness.step();
+        }
+        harness.run_steps(4);
+    }
     let t_settle = std::time::Instant::now();
     while t_settle.elapsed() < std::time::Duration::from_millis(settle_ms) {
         harness.step();
