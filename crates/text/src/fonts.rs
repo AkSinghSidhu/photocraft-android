@@ -767,12 +767,18 @@ static EXTRA_FONT_DIRS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::M
 
 /// Also scan `dir` for fonts (an app's own imported fonts, kept in its private storage). Call
 /// before the scan starts ([`crate::warm_shared`]); fonts added later are registered directly.
+/// Native targets only: there is no platform font dir on wasm (apps register fonts directly).
+#[cfg(not(target_arch = "wasm32"))]
 pub fn add_font_dir(dir: std::path::PathBuf) {
     let mut dirs = EXTRA_FONT_DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if !dirs.contains(&dir) {
         dirs.push(dir);
     }
 }
+
+/// No directories to add on wasm (see [`add_font_dir`]): apps register their fonts without a scan.
+#[cfg(target_arch = "wasm32")]
+pub fn add_font_dir(_dir: std::path::PathBuf) {}
 
 pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
@@ -809,6 +815,7 @@ pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
             v.push(h.join(".fonts"));
         }
     }
+    #[cfg(not(target_arch = "wasm32"))]
     v.extend(EXTRA_FONT_DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned());
     v
 }
