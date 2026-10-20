@@ -75,6 +75,9 @@ impl Default for SnapTo {
 pub struct ViewOptions {
     /// "standard" | "fullScreenWithMenuBar" | "fullScreen" (View › Screen Mode, F cycles).
     pub screen_mode: String,
+    /// "studio" | "simple" (View › UI Mode): which shell draws the frame. Simple Mode
+    /// ([`crate::simple_ui`]) is the touch-first shell; Studio Mode is this desktop chrome.
+    pub ui_mode: String,
     /// View › Extras (⌘H): master switch for guides, grid, edges and other overlays.
     pub extras: bool,
     pub show: Show,
@@ -110,6 +113,7 @@ impl Default for ViewOptions {
     fn default() -> Self {
         Self {
             screen_mode: "standard".into(),
+            ui_mode: "studio".into(),
             extras: true,
             show: Show::default(),
             snap_to: SnapTo::default(),
@@ -151,9 +155,14 @@ impl ViewOptions {
     pub fn shows_scrollbars(&self) -> bool {
         self.screen_mode == "standard"
     }
+    /// Simple Mode (View › UI Mode) replaces the desktop chrome with the touch-first shell.
+    pub fn simple(&self) -> bool {
+        self.ui_mode == "simple"
+    }
 }
 
 const SCREEN_MODES: [&str; 3] = ["standard", "fullScreenWithMenuBar", "fullScreen"];
+const UI_MODES: [&str; 2] = ["studio", "simple"];
 const PIXEL_ASPECTS: [&str; 8] = ["square", "d1DvNtsc", "d1DvPal", "d1DvNtscWidescreen", "hdv1080", "d1DvPalWidescreen", "dvcproHd1080", "anamorphic2To1"];
 const FONT_PREVIEW: [&str; 5] = ["small", "medium", "large", "extraLarge", "huge"];
 const LANGUAGE: [&str; 3] = ["defaultFeatures", "eastAsianFeatures", "middleEasternFeatures"];
@@ -401,6 +410,9 @@ pub fn handles(id: &str) -> bool {
     if let Some(k) = id.strip_prefix("view.screenMode.") {
         return SCREEN_MODES.contains(&k) || k == "cycle";
     }
+    if let Some(k) = id.strip_prefix("view.uiMode.") {
+        return UI_MODES.contains(&k) || k == "toggle";
+    }
     if let Some(k) = id.strip_prefix("view.pixelAspectRatio.") {
         return PIXEL_ASPECTS.contains(&k);
     }
@@ -493,6 +505,9 @@ pub fn checked(app: &PhotocraftApp, id: &str) -> Option<bool> {
     }
     if let Some(k) = id.strip_prefix("view.screenMode.") {
         return SCREEN_MODES.contains(&k).then(|| o.screen_mode == k);
+    }
+    if let Some(k) = id.strip_prefix("view.uiMode.") {
+        return UI_MODES.contains(&k).then(|| o.ui_mode == k);
     }
     if let Some(k) = id.strip_prefix("view.pixelAspectRatio.") {
         return PIXEL_ASPECTS.contains(&k).then(|| o.pixel_aspect == k);
@@ -705,6 +720,15 @@ fn run(app: &mut PhotocraftApp, ctx: &egui::Context, id: &str, p: &Value) -> Res
             ctx.send_viewport_cmd(command);
         }
         return Ok(json!({"screenMode": next}));
+    }
+    if let Some(k) = id.strip_prefix("view.uiMode.") {
+        if k != "toggle" && !UI_MODES.contains(&k) {
+            return Err(format!("unknown UI mode {k}"));
+        }
+        let next = if k == "toggle" { if o.ui_mode == "simple" { "studio" } else { "simple" } } else { k };
+        // The shells share the canvas and every command; only the chrome differs.
+        o.ui_mode = next.to_string();
+        return Ok(json!({"uiMode": o.ui_mode}));
     }
     if let Some(k) = id.strip_prefix("view.pixelAspectRatio.") {
         o.pixel_aspect = k.to_string();

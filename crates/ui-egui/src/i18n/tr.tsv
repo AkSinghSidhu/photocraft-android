@@ -3930,3 +3930,6 @@ cameraData	Lens	Lens
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	Serbest Dönüştürme hâlâ uygulanıyor; bittiğinde yeniden deneyin.
 	The transform couldn't be applied.	Dönüştürme uygulanamadı.
+	UI Mode	Arayüz modu
+	Simple Mode	Basit mod
+	Studio Mode	Stüdyo modu

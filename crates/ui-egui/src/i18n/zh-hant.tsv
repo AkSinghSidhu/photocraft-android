@@ -2801,3 +2801,6 @@ curves	Smooth	平滑
 # Free Transform: a new layer while the box is open (#5859)
 	Free Transform is still being applied; try again when it has finished.	任意變形仍在套用中；請在完成後再試一次。
 	The transform couldn't be applied.	無法套用變形。
+	UI Mode	UI 模式
+	Simple Mode	簡易模式
+	Studio Mode	工作室模式

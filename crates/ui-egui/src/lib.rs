@@ -186,6 +186,7 @@ pub(crate) mod shape_fill_ui;
 pub mod shape_stroke_ui;
 pub mod shortcut_dispatch;
 pub mod shortcuts;
+pub mod simple_ui;
 mod single_line_drag;
 mod sizing;
 pub mod slice_ui;
@@ -1970,7 +1971,10 @@ impl eframe::App for PhotocraftApp {
         // The OS title bar (and the taskbar / Alt-Tab entry) follows the active file; with the
         // system title bar this is where the document name lives, as the in-app title is hidden.
         panels::sync_window_title(self, &ctx);
-        let chrome = !self.ui.view.hides_chrome();
+        // Simple Mode (View › UI Mode) replaces the desktop chrome with the touch-first shell
+        // (simple_ui.rs); the canvas, gestures, dialogs and the Shortcut Pad keep working.
+        let simple = self.ui.view.simple();
+        let chrome = !self.ui.view.hides_chrome() && !simple;
         if chrome && self.ui.panels.menu_bar {
             panels::title_bar(self, ui);
         }
@@ -1987,7 +1991,8 @@ impl eframe::App for PhotocraftApp {
             panels::right_dock(self, ui);
         }
         let t = theme::Tokens::get(&ctx);
-        let backdrop = if chrome { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
+        // Simple Mode keeps the usual pasteboard, not full-screen black.
+        let backdrop = if chrome || simple { prefs_ui::pasteboard_color(self).unwrap_or(t.canvas) } else { egui::Color32::BLACK };
         egui::CentralPanel::default().frame(egui::Frame::NONE.fill(backdrop)).show(ui, |ui| {
             canvas::document_area(self, ui);
         });
@@ -2010,6 +2015,11 @@ impl eframe::App for PhotocraftApp {
         camera_raw_ui::show(self, &ctx);
         wide_angle_ui::show(self, &ctx);
         canvas::extra_windows(self, &ctx);
+        // Simple Mode's floating shell: the mode-switch button (bottom-left) and the undo, redo
+        // and save cluster (top-right). Under every dialog, notices stay last.
+        if simple {
+            simple_ui::show(self, &ctx);
+        }
         notices::show(self, &ctx);
         gpu_status::show_fallback(self, &ctx);
         kys_import::show_offer(self, &ctx);

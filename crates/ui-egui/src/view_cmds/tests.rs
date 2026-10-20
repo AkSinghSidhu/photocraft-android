@@ -60,6 +60,31 @@ fn show_snap_extras_and_screen_modes_are_state() {
 }
 
 #[test]
+fn ui_mode_switches_and_is_state() {
+    let (mut app, ctx) = app_with(1);
+    assert!(is_live("view.uiMode.simple") && is_live("view.uiMode.studio"), "live in the View menu");
+    assert_eq!(checked(&app, "view.uiMode.studio"), Some(true));
+    assert_eq!(checked(&app, "view.uiMode.simple"), Some(false));
+    menu(&mut app, &ctx, "view.uiMode.simple", json!({})).unwrap();
+    assert!(app.ui.view.simple());
+    assert_eq!(checked(&app, "view.uiMode.simple"), Some(true));
+    // The two check items reflect the mode; the toggle flips it (the round button's action).
+    menu(&mut app, &ctx, "view.uiMode.toggle", json!({})).unwrap();
+    assert!(!app.ui.view.simple());
+    menu(&mut app, &ctx, "view.uiMode.toggle", json!({})).unwrap();
+    assert!(app.ui.view.simple());
+    // Unknown suffixes are never live, so the menu falls through them (an Err here, from the
+    // fallbacks); the document is untouched either way.
+    assert!(menu(&mut app, &ctx, "view.uiMode.weird", json!({})).is_err());
+    assert!(app.session.active().is_some());
+    // State serializes with the rest of the UI (control channel), and a state file from before
+    // the field existed defaults to Studio Mode.
+    let v = serde_json::to_value(&app.ui).unwrap();
+    assert_eq!(v["view"]["ui_mode"], "simple");
+    assert_eq!(serde_json::from_value::<ViewOptions>(json!({})).unwrap().ui_mode, "studio");
+}
+
+#[test]
 fn full_screen_and_maximized_never_overlap_on_windows() {
     use egui::ViewportCommand::{Fullscreen, Maximized};
     // Maximized → full screen: un-maximize first, and remember it.

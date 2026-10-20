@@ -39,6 +39,11 @@ pub const SHELL_COMMANDS: &[(&str, &str, &[&str], Option<&str>)] = &[
     ("view.extras", "Extras", &["View"], Some("Cmd+H")),
     ("view.show.targetPath", "Target Path", &["View", "Show"], Some("Cmd+Shift+H")),
     ("view.screenMode.cycle", "Cycle Screen Mode", &[], Some("F")),
+    // The touch-first shell (View › UI Mode): the Simple Mode idea from Clip Studio Paint, drawn
+    // in PhotoCraft's own theme (simple_ui.rs). `view_cmds.rs` runs them; the simple shell's
+    // round button switches back.
+    ("view.uiMode.simple", "Simple Mode", &["View", "UI Mode"], None),
+    ("view.uiMode.studio", "Studio Mode", &["View", "UI Mode"], None),
     // Photoshop's interface brightness shortcuts: step through the four Pro themes.
     ("view.darkenInterface", "Darken Interface", &[], Some("Cmd+Shift+F1")),
     ("view.lightenInterface", "Lighten Interface", &[], Some("Cmd+Shift+F2")),
