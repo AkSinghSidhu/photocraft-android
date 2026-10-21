@@ -221,6 +221,16 @@ public class PhotoCraftActivity extends GameActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
+        // Some Samsung devices report an S Pen touching with its side button held as their own
+        // actions (211 down, 212 up, 213 move, 214 cancel), which nothing downstream knows: the
+        // pen then did nothing at all while the button was held. Turn them into Android's own
+        // and remember the button, for the pen buttons' settings.
+        int samsung = e.getActionMasked() - SAMSUNG_PEN_DOWN;
+        sideButtonHeld = samsung >= 0 && samsung <= 3;
+        if (sideButtonHeld) {
+            int[] standard = {MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_CANCEL};
+            e.setAction(standard[samsung] | (e.getAction() & MotionEvent.ACTION_POINTER_INDEX_MASK));
+        }
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             int i = e.getActionIndex();
@@ -229,7 +239,7 @@ public class PhotoCraftActivity extends GameActivity {
                 getWindow().getDecorView().requestUnbufferedDispatch(e);
             }
             try {
-                nativePointer(e.getPointerId(i), e.getToolType(i), e.getButtonState());
+                nativePointer(e.getPointerId(i), e.getToolType(i), buttonsOf(e));
             } catch (UnsatisfiedLinkError err) {
                 // The library isn't loaded: every pointer counts as a finger.
             }
@@ -240,8 +250,19 @@ public class PhotoCraftActivity extends GameActivity {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        sideButtonHeld = false;
         forwardPen(e);
         return super.dispatchGenericMotionEvent(e);
+    }
+
+    /** Samsung's first S Pen action with the side button held (see dispatchTouchEvent). */
+    private static final int SAMSUNG_PEN_DOWN = 211;
+    /** The event being dispatched came as one of Samsung's side-button actions. */
+    private boolean sideButtonHeld;
+
+    /** The event's buttons, with the side button when Samsung reported it as its own action. */
+    private int buttonsOf(MotionEvent e) {
+        return e.getButtonState() | (sideButtonHeld ? MotionEvent.BUTTON_STYLUS_PRIMARY : 0);
     }
 
     private static boolean isPen(int tool) {
@@ -275,7 +296,7 @@ public class PhotoCraftActivity extends GameActivity {
             int action = e.getActionMasked();
             int p = penPointer(e);
             int tool = e.getToolType(p);
-            int buttons = e.getButtonState();
+            int buttons = buttonsOf(e);
             long now = SystemClock.uptimeMillis();
             if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
                 // Another finger coming or going says nothing about the pen.
