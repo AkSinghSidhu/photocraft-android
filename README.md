@@ -43,6 +43,10 @@ at runtime from View › UI Mode, drawn in PhotoCraft's own theme. The Classic d
 untouched and everything Simple doesn't draw keeps working: the canvas with all gestures and
 tools, dialogs, and the Shortcut Pad.
 
+| **Studio Mode — the desktop shell** | **Simple Mode — the touch shell** |
+|---|---|
+| <img src="docs/images/studio-mode.png" width="492" alt="Studio Mode on a tablet: menu bar, toolbars, floating panels and the canvas"> | <img src="docs/images/simple-mode.png" width="492" alt="Simple Mode on a tablet: round buttons in the top corners, the tool rail with colour dots on the left, size and opacity pills at the bottom centre, the layers palette on the right edge and the mode switch at the bottom left"> |
+
 Shipped so far (2026-10-21), laid out like the CSP Simple Mode reference:
 
 - **Mode switch both ways:** View › UI Mode in the menu bar, a round switch button at the
