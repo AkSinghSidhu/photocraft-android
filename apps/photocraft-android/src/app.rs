@@ -4,6 +4,7 @@
 use crate::bridge::Bridge;
 use photocraft_engine::Session;
 use photocraft_ui_egui::PhotocraftApp;
+use photocraft_ui_egui::stroke_trace::Summary;
 use photocraft_ui_egui::stylus::PenSample;
 use photocraft_ui_egui::theme::ThemeKind;
 use std::sync::Arc;
@@ -40,6 +41,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
     if let eframe::egui_wgpu::WgpuSetup::CreateNew(create) = &mut options.wgpu_options.wgpu_setup {
         create.instance_descriptor.backends = eframe::wgpu::Backends::VULKAN | eframe::wgpu::Backends::GL;
     }
+    let present = present_settings(&mut options, &android);
 
     eframe::run_native(
         "PhotoCraft",
@@ -68,6 +70,8 @@ fn run(android: AndroidApp) -> Result<(), String> {
             // The pen's pressure comes from the Activity; a finger's touch "force" is its
             // contact size, which would paint near-invisible strokes.
             app.stylus.touch_force = false;
+            enable_stroke_trace(&mut app, &android);
+            app.perf.gpu_info.present = present;
             let feed = app.stylus.feed.clone();
             let ctx = cc.egui_ctx.clone();
             let first = std::sync::atomic::AtomicBool::new(true);
@@ -106,10 +110,50 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 layout,
                 pen_path: Vec::new(),
                 drawn: Default::default(),
+                trace_logged: None,
             }))
         }),
     )
     .map_err(|e| e.to_string())
+}
+
+/// The stroke latency trace (`docs/development.md`), on when a file named `stroke-trace` is in
+/// the app's external data directory (`/sdcard/Android/data/<package>/files`, which `adb` can
+/// reach): every frame of each stroke is appended to `stroke-trace.csv` beside it and each
+/// stroke's summary goes to logcat (tag `PhotoCraft`). There are no environment variables to set
+/// on Android.
+fn enable_stroke_trace(app: &mut PhotocraftApp, android: &AndroidApp) {
+    let Some(dir) = android.external_data_path() else { return };
+    if dir.join("stroke-trace").exists() {
+        let csv = dir.join("stroke-trace.csv");
+        log::info!("stroke trace on: frames go to {}", csv.display());
+        app.stroke_trace.set(&csv.to_string_lossy());
+    }
+}
+
+/// Latency experiments: the `present` file beside the `stroke-trace` flag sets the swap chain's
+/// frame latency and vsync (see [`crate::present`]). Returns how frames are presented, for the
+/// trace.
+fn present_settings(options: &mut eframe::NativeOptions, android: &AndroidApp) -> String {
+    let surface = &mut options.wgpu_options.surface;
+    let text = android.external_data_path().and_then(|dir| std::fs::read_to_string(dir.join("present")).ok());
+    let (present, problems) = crate::present::parse(text.as_deref().unwrap_or_default());
+    for p in problems {
+        log::warn!("{p}");
+    }
+    if let Some(vsync) = present.vsync {
+        surface.present_mode = if vsync { eframe::wgpu::PresentMode::Fifo } else { eframe::wgpu::PresentMode::AutoNoVsync };
+    }
+    surface.desired_maximum_frame_latency = present.latency.or(surface.desired_maximum_frame_latency);
+    let latency = surface.desired_maximum_frame_latency.map_or("default".to_string(), |n| n.to_string());
+    let description = format!("{:?}, latency {latency}", surface.present_mode);
+    log::info!("presentation: {description}");
+    description
+}
+
+/// A named section on Perfetto's timeline, when a trace is running (`adb shell perfetto`).
+fn section(name: &str) -> Option<ndk::trace::Section> {
+    ndk::trace::is_trace_enabled().then(|| ndk::trace::Section::new(name).ok()).flatten()
 }
 
 /// The app plus what the Android shell adds each frame: on-screen keyboard text (see
@@ -139,6 +183,8 @@ struct Shell {
     layout: crate::layout::Layout,
     /// Where the last frame drew everything (see [`crate::touch::Snapshot`]).
     drawn: crate::touch::Snapshot,
+    /// The last stroke trace summary written to logcat.
+    trace_logged: Option<Summary>,
 }
 
 impl Shell {
@@ -153,6 +199,7 @@ impl Shell {
 
 impl eframe::App for Shell {
     fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        let _section = section("photocraft:logic");
         // Phone or tablet, decided again every frame (rotation, a foldable opening, split screen).
         let phone = self.layout.is_phone(ctx);
         self.app.compact_layout = phone;
@@ -317,13 +364,26 @@ impl eframe::App for Shell {
         }
         self.keys.apply(raw_input);
         self.app.raw_input_hook(ctx, raw_input);
+        // After the app's hook, which starts the trace's frame.
+        if let Some(age) = android::take_input_age() {
+            self.app.stroke_trace.input_age(age.newest_ms);
+        }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        let _section = section("photocraft:ui");
         let tokens = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
         // The pad first, so the app lays out beside it.
         self.pad.show(ui, &tokens, &self.app);
+        let section = section("photocraft:app");
         self.app.ui(ui, frame);
+        drop(section);
+        if self.app.stroke_trace.enabled() && self.app.stroke_trace.last != self.trace_logged {
+            self.trace_logged = self.app.stroke_trace.last.clone();
+            if let Some(summary) = &self.trace_logged {
+                log::info!("{}", summary.line());
+            }
+        }
         self.pad.settings(ui.ctx(), &tokens);
         self.touch.settings(ui.ctx(), &tokens, photocraft_tablet::android::controls_held(), photocraft_tablet::android::last_buttons());
         // What was drawn where, for the next frame's touches (see `touch::Snapshot`).

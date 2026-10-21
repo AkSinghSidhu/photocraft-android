@@ -4731,6 +4731,7 @@ dependencies = [
  "eframe",
  "egui",
  "log",
+ "ndk",
  "photocraft-codecs",
  "photocraft-doc",
  "photocraft-engine",
