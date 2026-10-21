@@ -275,6 +275,27 @@ impl Snapshot {
         self.layers.iter().rev().find(|(_, w)| w.iter().any(|w| w.rect.contains(p)))
     }
 
+    /// A point on row `y`, from the right end of `xs` leftwards, where a wheel scrolls the list
+    /// under it instead of changing a control: on something drawn (a label, a scroll area's
+    /// background) but on nothing that can be clicked. For scrolling a field the keyboard covers
+    /// back into view.
+    pub fn quiet_point(&self, xs: std::ops::RangeInclusive<f32>, y: f32) -> Option<egui::Pos2> {
+        let mut x = *xs.end();
+        while x >= *xs.start() {
+            let p = egui::pos2(x, y);
+            if let Some((_, widgets)) = self.top(p) {
+                // A window's or a modal's own background senses clicks too; a control is small.
+                let small = |r: egui::Rect| r.height() <= LIST_ROW_MAX_HEIGHT && r.width() <= 600.0;
+                let control = widgets.iter().any(|w| w.enabled && w.click && small(w.rect) && w.interact.contains(p));
+                if !control {
+                    return Some(p);
+                }
+            }
+            x -= 8.0;
+        }
+        None
+    }
+
     /// Whether a window, menu or popup was drawn over `p`: touches there belong to it, not to the
     /// canvas or the Shortcut Pad.
     pub fn covered(&self, p: egui::Pos2) -> bool {

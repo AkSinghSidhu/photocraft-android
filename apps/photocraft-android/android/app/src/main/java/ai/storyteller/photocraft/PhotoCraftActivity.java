@@ -95,6 +95,7 @@ public class PhotoCraftActivity extends GameActivity {
                 checkSync();
                 checkQuit();
                 checkUpdateRequest();
+                checkClipboard();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
             }
@@ -477,6 +478,43 @@ public class PhotoCraftActivity extends GameActivity {
         f.delete();
         checkSync();
         finish();
+    }
+
+    /**
+     * The system clipboard for text fields: `clip-set.txt` (written by the app) is copied to it,
+     * and `clip-get` asks for its text, answered in `clip.txt`. Read only when the app asks (a
+     * paste), and the files are removed as soon as they're read.
+     */
+    private void checkClipboard() throws IOException {
+        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (cm == null) {
+            return;
+        }
+        File set = new File(bridge, "clip-set.txt");
+        if (set.isFile()) {
+            String text = readText(set);
+            //noinspection ResultOfMethodCallIgnored
+            set.delete();
+            cm.setPrimaryClip(ClipData.newPlainText("PhotoCraft", text));
+        }
+        File get = new File(bridge, "clip-get");
+        if (get.exists() && get.delete()) {
+            String text = "";
+            ClipData clip = cm.getPrimaryClip();
+            if (clip != null && clip.getItemCount() > 0) {
+                CharSequence t = clip.getItemAt(0).coerceToText(this);
+                if (t != null) {
+                    text = t.toString();
+                }
+            }
+            File tmp = new File(bridge, "clip.txt.tmp");
+            try (OutputStream out = new FileOutputStream(tmp)) {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            if (!tmp.renameTo(new File(bridge, "clip.txt"))) {
+                Log.w(TAG, "clipboard: rename failed");
+            }
+        }
     }
 
     /** Help › Check for Updates… (bridge `check-update`). */

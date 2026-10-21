@@ -116,6 +116,25 @@ impl Bridge {
         std::fs::remove_file(self.root.join("keyboard-hidden")).is_ok()
     }
 
+    /// Put `text` on the system clipboard (a text field's Copy or Cut).
+    pub fn set_clipboard(&self, text: &str) -> Result<(), String> {
+        write_then_rename(&self.root.join("clip-set.txt"), text.as_bytes())
+    }
+
+    /// Ask for the system clipboard's text (a Paste); it comes back through [`Self::take_clipboard`].
+    pub fn request_clipboard(&self) -> Result<(), String> {
+        let _ = std::fs::remove_file(self.root.join("clip.txt"));
+        write_then_rename(&self.root.join("clip-get"), b"")
+    }
+
+    /// The clipboard text asked for, once it has arrived (the file is removed as it's read).
+    pub fn take_clipboard(&self) -> Option<String> {
+        let path = self.root.join("clip.txt");
+        let text = std::fs::read(&path).ok()?;
+        let _ = std::fs::remove_file(&path);
+        Some(String::from_utf8_lossy(&text).into_owned())
+    }
+
     /// Ask the Activity to look for an update now (Help › Check for Updates…).
     pub fn request_update_check(&self) -> Result<(), String> {
         write_then_rename(&self.root.join("check-update"), b"")

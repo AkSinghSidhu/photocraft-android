@@ -112,6 +112,13 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 layout,
                 pen_path: Vec::new(),
                 toggled_from: None,
+                last_ime: None,
+                ime_hidden: false,
+                scrolled_for: None,
+                text_bar: Vec::new(),
+                text_bar_touch: None,
+                text_bar_tap: None,
+                paste_pending: false,
                 drawn: Default::default(),
                 trace_logged: None,
             }))
@@ -180,6 +187,19 @@ struct Shell {
     font_outcome: crate::fonts::Outcome,
     /// Touch gestures and their settings (see [`crate::touch`]).
     touch: crate::touch::TouchInput,
+    /// The focused text field's last keyboard request (where it was on screen), and whether it
+    /// was off screen last frame (see the end of `ui`).
+    last_ime: Option<egui::output::IMEOutput>,
+    ime_hidden: bool,
+    /// The Select All / Cut / Copy / Paste bar over the focused text field, as drawn last frame.
+    text_bar: Vec<(egui::Rect, TextAction)>,
+    /// A touch that started on the bar (the action under it), and a finished tap's action.
+    text_bar_touch: Option<(egui::TouchId, TextAction)>,
+    text_bar_tap: Option<TextAction>,
+    /// A paste waits for the system clipboard's text.
+    paste_pending: bool,
+    /// The focused field being scrolled into view above the keyboard, and how far so far.
+    scrolled_for: Option<(egui::Id, f32)>,
     /// The tool a pen button's "Switch to Eraser and back" left, to return to.
     toggled_from: Option<photocraft_ui_egui::Tool>,
     /// Pen sample positions not yet put into a frame (see [`crate::pen_path`]).
@@ -192,7 +212,59 @@ struct Shell {
     trace_logged: Option<Summary>,
 }
 
+/// An edit from the text bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TextAction {
+    SelectAll,
+    Cut,
+    Copy,
+    Paste,
+}
+
 impl Shell {
+    /// Ask for the system clipboard's text, to paste when it arrives.
+    fn request_paste(&mut self) {
+        match self.bridge.request_clipboard() {
+            Ok(()) => self.paste_pending = true,
+            Err(e) => log::warn!("clipboard: {e}"),
+        }
+    }
+
+    /// The Select All / Cut / Copy / Paste bar, above the text field being typed in (below it
+    /// when there's no room), as a phone's text fields have. Returns its buttons' places, for
+    /// the next frame's taps (see `raw_input_hook`).
+    fn show_text_bar(&self, ctx: &egui::Context) -> Vec<(egui::Rect, TextAction)> {
+        let Some(field) = self.last_ime.map(|i| i.rect) else { return Vec::new() };
+        if self.ime_hidden || !ctx.egui_wants_keyboard_input() {
+            return Vec::new();
+        }
+        const BUTTONS: [(&str, TextAction); 4] =
+            [("Select All", TextAction::SelectAll), ("Cut", TextAction::Cut), ("Copy", TextAction::Copy), ("Paste", TextAction::Paste)];
+        let (w, h, gap) = (78.0, 34.0, 6.0);
+        let total = BUTTONS.len() as f32 * w + (BUTTONS.len() - 1) as f32 * 2.0;
+        let screen = ctx.content_rect();
+        let x = (field.center().x - total / 2.0).clamp(screen.left() + 4.0, (screen.right() - total - 4.0).max(screen.left() + 4.0));
+        let y = if field.top() - h - gap >= screen.top() + 4.0 { field.top() - h - gap } else { field.bottom() + gap };
+        let t = photocraft_ui_egui::theme::Tokens::for_kind(self.app.ui.theme);
+        let mut places = Vec::new();
+        egui::Area::new(egui::Id::new("android-text-bar")).order(egui::Order::Tooltip).fixed_pos(egui::pos2(x, y)).interactable(false).show(ctx, |ui| {
+            let bar = egui::Rect::from_min_size(egui::pos2(x, y), egui::vec2(total, h));
+            ui.painter().rect(bar, 8.0, t.chrome, egui::Stroke::new(1.0, t.separator), egui::StrokeKind::Inside);
+            for (i, (label, action)) in BUTTONS.iter().enumerate() {
+                let r = egui::Rect::from_min_size(egui::pos2(x + i as f32 * (w + 2.0), y), egui::vec2(w, h));
+                if i > 0 {
+                    ui.painter().line_segment(
+                        [egui::pos2(r.left() - 1.0, r.top() + 7.0), egui::pos2(r.left() - 1.0, r.bottom() - 7.0)],
+                        egui::Stroke::new(1.0, t.separator),
+                    );
+                }
+                ui.painter().text(r.center(), egui::Align2::CENTER_CENTER, *label, egui::FontId::proportional(13.0), t.text);
+                places.push((r, *action));
+            }
+            ui.allocate_rect(bar, egui::Sense::hover());
+        });
+        places
+    }
     /// Set the keyboard up for a text field or for shortcuts (`flags` on top of plain text) and
     /// empty its buffer.
     fn reset_keyboard(&mut self, flags: InputType) {
@@ -358,8 +430,70 @@ impl eframe::App for Shell {
         if crate::pen_path::splice(&mut raw_input.events, &self.pen_path, ctx.pixels_per_point(), is_pen) > 0 {
             self.pen_path.clear();
         }
+        // Taps on the text bar (drawn over the app last frame) never reach the app: a tap
+        // anywhere else would take the focus from the field it edits.
+        let bar = self.text_bar.clone();
+        raw_input.events.retain(|e| {
+            let egui::Event::Touch { id, phase, pos, .. } = e else { return true };
+            if *phase == egui::TouchPhase::Start
+                && let Some(b) = bar.iter().find(|(r, _)| r.contains(*pos))
+            {
+                self.text_bar_touch = Some((*id, b.1));
+            }
+            match self.text_bar_touch {
+                Some((t, action)) if t == *id => {
+                    if matches!(phase, egui::TouchPhase::End | egui::TouchPhase::Cancel) {
+                        self.text_bar_touch = None;
+                        if *phase == egui::TouchPhase::End {
+                            self.text_bar_tap = Some(action);
+                        }
+                    }
+                    false
+                }
+                _ => true,
+            }
+        });
         let drawn = &self.drawn;
         self.pad.input(ctx, raw_input, &env, |p| drawn.covered(p));
+        // A focused field the keyboard now covers: scroll its list until the field shows again, as
+        // a finger would (a wheel over an empty part of the same list, never over a control, which
+        // the wheel would change), a step a frame and no further than SCROLL_LIMIT. Its place is
+        // the one it last had on screen, from its last keyboard request.
+        const STEP: f32 = 48.0;
+        const SCROLL_LIMIT: f32 = 900.0;
+        let focus = ctx.memory(|m| m.focused());
+        if self.scrolled_for.is_some_and(|(id, _)| Some(id) != focus) {
+            self.scrolled_for = None;
+        }
+        let scrolled = self.scrolled_for.map_or(0.0, |(_, s)| s);
+        if self.ime_hidden
+            && ime > 1.0
+            && scrolled < SCROLL_LIMIT
+            && let Some(id) = focus
+            && let (Some(field), Some(screen)) = (self.last_ime.map(|i| i.rect), raw_input.screen_rect)
+        {
+            self.scrolled_for = Some((id, scrolled + STEP));
+            let bottom = screen.max.y;
+            let need = STEP;
+            // The list holding the field runs up the field's column from where it was; a dialog's
+            // button row can sit at the bottom, so aim well above it.
+            let top = screen.min.y;
+            let quiet = [0.7, 0.6, 0.5, 0.4]
+                .into_iter()
+                .map(|f| top + (field.min.y.min(bottom) - top) * f)
+                .find_map(|y| self.drawn.quiet_point(field.min.x - 400.0..=field.max.x, y));
+            if need > 0.0
+                && let Some(p) = quiet
+            {
+                raw_input.events.push(egui::Event::PointerMoved(p));
+                raw_input.events.push(egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, -need),
+                    phase: egui::TouchPhase::Move,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+        }
         // A side button pressed while the pen hovers: a right-click under the pen (after the
         // router, which replaces pointer events with its own).
         let ppp = ctx.pixels_per_point();
@@ -379,7 +513,45 @@ impl eframe::App for Shell {
                 }
             }
         }
+        // Ctrl+V from a hardware keyboard: egui-winit pastes its own (empty) clipboard on
+        // Android; paste the system's instead, once it arrives.
+        let before = raw_input.events.len();
+        raw_input.events.retain(|e| !matches!(e, egui::Event::Paste(_)));
+        if raw_input.events.len() != before {
+            self.request_paste();
+        }
         self.keys.apply(raw_input);
+        // The text bar's taps, as the edits they stand for (after the modifiers are worked out,
+        // so Select All keeps its Ctrl).
+        if let Some(action) = self.text_bar_tap.take() {
+            match action {
+                TextAction::SelectAll => {
+                    for pressed in [true, false] {
+                        raw_input.events.push(egui::Event::Key {
+                            key: egui::Key::A,
+                            physical_key: None,
+                            pressed,
+                            repeat: false,
+                            modifiers: egui::Modifiers::COMMAND,
+                        });
+                    }
+                }
+                TextAction::Cut => raw_input.events.push(egui::Event::Cut),
+                TextAction::Copy => raw_input.events.push(egui::Event::Copy),
+                TextAction::Paste => self.request_paste(),
+            }
+        }
+        if self.paste_pending {
+            match self.bridge.take_clipboard() {
+                Some(text) => {
+                    self.paste_pending = false;
+                    if !text.is_empty() {
+                        raw_input.events.push(egui::Event::Paste(text));
+                    }
+                }
+                None => ctx.request_repaint_after(std::time::Duration::from_millis(60)),
+            }
+        }
         self.app.raw_input_hook(ctx, raw_input);
         // After the app's hook, which starts the trace's frame.
         if let Some(age) = android::take_input_age() {
@@ -403,6 +575,36 @@ impl eframe::App for Shell {
         }
         self.pad.settings(ui.ctx(), &tokens);
         self.touch.settings(ui.ctx(), &tokens, photocraft_tablet::android::controls_held(), photocraft_tablet::android::last_buttons());
+        // Copy and Cut in a text field go to the system clipboard.
+        for command in ui.ctx().output(|o| o.commands.clone()) {
+            if let egui::OutputCommand::CopyText(text) = command
+                && let Err(e) = self.bridge.set_clipboard(&text)
+            {
+                log::warn!("clipboard: {e}");
+            }
+        }
+        self.text_bar = self.show_text_bar(ui.ctx());
+        // egui asks for the keyboard only while the focused field is on screen. When the layout
+        // shrinks above the keyboard and the field ends up below it, the request would stop, the
+        // keyboard close, the field come back and ask again: the keyboard flickered open and shut
+        // and nothing could be typed (#14). Keep asking while a field has focus.
+        let ctx = ui.ctx();
+        match ctx.output(|o| o.ime) {
+            Some(ime) => {
+                self.last_ime = Some(ime);
+                self.ime_hidden = false;
+            }
+            None if ctx.memory(|m| m.focused().is_some()) && ctx.egui_wants_keyboard_input() => {
+                self.ime_hidden = true;
+                if let Some(ime) = self.last_ime {
+                    ctx.output_mut(|o| o.ime = Some(ime));
+                }
+            }
+            None => {
+                self.last_ime = None;
+                self.ime_hidden = false;
+            }
+        }
         // What was drawn where, for the next frame's touches (see `touch::Snapshot`).
         self.drawn = crate::touch::Snapshot::take(ui.ctx());
     }
