@@ -23,6 +23,7 @@ pub mod keys;
 pub mod layout;
 pub mod pad;
 pub mod pen_path;
+pub mod present;
 pub mod services;
 pub mod touch;
 pub mod updates;

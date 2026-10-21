@@ -42,6 +42,8 @@ serde_json = { workspace = true }
 [target.'cfg(target_os = "android")'.dependencies]
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "android-game-activity"] }
 android_logger = { version = "0.15", default-features = false }
+# Perfetto trace sections (`ATrace_beginSection`, API 23). Already in Cargo.lock (winit's Android backend).
+ndk = { version = "0.9", default-features = false, features = ["api-level-23"] }
 # The `AndroidApp` type `android_main` receives (eframe's `NativeOptions::android_app`); eframe
 # doesn't re-export winit. Already in Cargo.lock (eframe); pinned exactly to the same version, as in apps/photocraft.
 winit = { version = "=0.30.13", default-features = false, features = ["android-game-activity"] }

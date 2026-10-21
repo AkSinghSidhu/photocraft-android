@@ -142,7 +142,7 @@ Keys are the field names of `theme::Tokens` (`crates/ui-egui/src/theme.rs`). Edi
 To find where a stroke's input-to-pixel time goes on a given machine (#1343), launch with `PHOTOCRAFT_STROKE_TRACE=1` (a summary per stroke on standard error) or `PHOTOCRAFT_STROKE_TRACE=strokes.csv` (also every frame, appended to that file). Paint a few strokes with the mouse or pen. Each summary gives p50/p95 in ms:
 
 ```text
-stroke trace: 62 frames on vulkan NVIDIA GeForce RTX 5090 (p50/p95 ms): interval 8.33/8.53 moves/frame 1.00/2.00 stroke 0.80/1.53 canvas 0.40/0.75 ui 0.91/1.41 cpu 2.20/2.84 wait 6.04/6.64
+stroke trace: 62 frames on vulkan NVIDIA GeForce RTX 5090 (p50/p95 ms): interval 8.33/8.53 moves/frame 1.00/2.00 stroke 0.80/1.53 canvas 0.40/0.75 ui 0.91/1.41 cpu 2.20/2.84 wait 6.04/6.64 input 0.00/0.00
 ```
 
 | Column | What it is |
@@ -154,8 +154,19 @@ stroke trace: 62 frames on vulkan NVIDIA GeForce RTX 5090 (p50/p95 ms): interval
 | `ui` | Building the UI, the two above included |
 | `cpu` | eframe's CPU time per frame: UI, tessellation and GPU submission, without the vsync wait |
 | `wait` | `interval − cpu`: waiting on vsync or the swap chain, or idle |
+| `input` | Android only (0 elsewhere): how old the newest pen sample is when the frame starts, from the digitizer's event time. The input queue, Android's batching and the wait for a frame. |
 
-What the app can't time is the rest of input-to-photon: the OS input queue before a frame starts (up to one `interval`), frames queued for the display (the surface keeps up to two; the GL backend ignores that setting), and the compositor. So the first line names the backend and how frames are presented. To compare presentation settings without rebuilding, launch with `PHOTOCRAFT_PRESENT_MODE` and `PHOTOCRAFT_FRAME_LATENCY` (see [Environment variables](#environment-variables)): with `novsync` the app no longer waits on vsync (`wait` near 0): each refresh shows the newest frame, and where the driver only offers Immediate, the screen may tear. The last summary is also in the control channel's `perf.strokeTrace` (`ui.inspect`). The code is `crates/ui-egui/src/stroke_trace.rs`.
+What the app can't time is the rest of input-to-photon: the OS input queue before a frame starts (up to one `interval`; on Android the `input` column measures it), frames queued for the display (the surface keeps up to two; the GL backend ignores that setting), and the compositor. So the first line names the backend and how frames are presented. To compare presentation settings without rebuilding, launch with `PHOTOCRAFT_PRESENT_MODE` and `PHOTOCRAFT_FRAME_LATENCY` (see [Environment variables](#environment-variables)): with `novsync` the app no longer waits on vsync (`wait` near 0): each refresh shows the newest frame, and where the driver only offers Immediate, the screen may tear. The last summary is also in the control channel's `perf.strokeTrace` (`ui.inspect`). The code is `crates/ui-egui/src/stroke_trace.rs`.
+
+On Android there are no environment variables, so the trace is switched on by an empty file named `stroke-trace` in the app's external files directory, and the app is restarted. A summary per stroke goes to logcat, every frame to `stroke-trace.csv` beside the flag:
+
+```sh
+adb shell touch /sdcard/Android/data/ai.storyteller.photocraft/files/stroke-trace
+adb logcat -s PhotoCraft
+adb pull /sdcard/Android/data/ai.storyteller.photocraft/files/stroke-trace.csv
+```
+
+A file named `present` beside it holds `latency=1` to `latency=3` (frames the swap chain may queue) and `mode=fifo` or `mode=novsync`, separated by spaces, for the presentation experiments above (`apps/photocraft-android/src/present.rs`). For a system view, record a Perfetto trace (`adb shell perfetto` or the System Tracing app) while drawing: the app adds the sections `photocraft:pen` (the Activity's input hook), `photocraft:logic`, `photocraft:ui` and `photocraft:app`, next to Android's input and frame timeline tracks.
 
 ## Driving the app programmatically
 

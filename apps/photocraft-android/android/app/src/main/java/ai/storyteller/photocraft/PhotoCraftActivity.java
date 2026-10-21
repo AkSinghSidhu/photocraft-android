@@ -10,6 +10,8 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.os.Trace;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.MotionEvent;
@@ -66,7 +68,7 @@ public class PhotoCraftActivity extends GameActivity {
     }
 
     /** One pointer of a MotionEvent (photocraft-tablet's android.rs). */
-    private static native void nativePen(int action, int tool, int buttons, float pressure, float tilt, float orientation, float x, float y);
+    private static native void nativePen(int action, int tool, int buttons, float pressure, float tilt, float orientation, float x, float y, int ageMs);
 
     /** A pointer went down: its id, tool type and buttons, so Rust tells fingers from pens and a
      * right-click from a click (touch gestures,
@@ -261,12 +263,20 @@ public class PhotoCraftActivity extends GameActivity {
         return 0;
     }
 
+    /** Milliseconds since an event happened (both on the uptime clock), for the latency trace. */
+    private static int age(long now, long eventTime) {
+        return (int) Math.max(0, Math.min(now - eventTime, 10_000));
+    }
+
     private void forwardPen(MotionEvent e) {
+        // A marker for Perfetto traces (free when no trace is running): lines pen delivery up with frames.
+        Trace.beginSection("photocraft:pen");
         try {
             int action = e.getActionMasked();
             int p = penPointer(e);
             int tool = e.getToolType(p);
             int buttons = e.getButtonState();
+            long now = SystemClock.uptimeMillis();
             if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
                 // Another finger coming or going says nothing about the pen.
                 if (!isPen(tool)) {
@@ -278,15 +288,17 @@ public class PhotoCraftActivity extends GameActivity {
                 for (int h = 0; h < e.getHistorySize(); h++) {
                     nativePen(action, tool, buttons, e.getHistoricalPressure(p, h),
                             e.getHistoricalAxisValue(MotionEvent.AXIS_TILT, p, h), e.getHistoricalOrientation(p, h),
-                            e.getHistoricalX(p, h), e.getHistoricalY(p, h));
+                            e.getHistoricalX(p, h), e.getHistoricalY(p, h), age(now, e.getHistoricalEventTime(h)));
                 }
             }
             nativePen(action, tool, buttons, e.getPressure(p), e.getAxisValue(MotionEvent.AXIS_TILT, p), e.getOrientation(p),
-                    e.getX(p), e.getY(p));
+                    e.getX(p), e.getY(p), age(now, e.getEventTime()));
         } catch (UnsatisfiedLinkError err) {
             // The library isn't loaded (it failed to load): the pen paints like a finger.
         } catch (RuntimeException err) {
             Log.w(TAG, "pen", err);
+        } finally {
+            Trace.endSection();
         }
     }
 

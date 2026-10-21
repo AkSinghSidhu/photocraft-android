@@ -11,6 +11,7 @@
 
 #![allow(unsafe_code)]
 
+use crate::input_age::{InputAge, InputAges};
 use crate::motion::{self, PenControl, Pointers, RawEvent, handle_with, tool};
 use crate::{Error, Sample, Update, deliver};
 use std::ffi::c_void;
@@ -38,6 +39,8 @@ static PATH: Mutex<Vec<(f32, f32)>> = Mutex::new(Vec::new());
 const PATH_MAX: usize = 480;
 /// Whether the hovering pen's last sample erased, so hover moves send only changes.
 static HOVER_END: Mutex<Option<bool>> = Mutex::new(None);
+/// How old the pen's samples were on arrival, since [`take_input_age`].
+static AGES: Mutex<InputAges> = Mutex::new(InputAges::new());
 /// The button state of the pen's last event, as Android reported it ([`last_buttons`]).
 static LAST_BUTTONS: Mutex<i32> = Mutex::new(0);
 
@@ -98,6 +101,12 @@ pub fn take_pen_path() -> Vec<(f32, f32)> {
     std::mem::take(&mut *PATH.lock().unwrap_or_else(PoisonError::into_inner))
 }
 
+/// How old the pen's samples have become now, since the last call (see [`InputAges`]): the
+/// input queue, batching and waiting for a frame. `None` when the pen sent nothing since.
+pub fn take_input_age() -> Option<InputAge> {
+    AGES.lock().unwrap_or_else(PoisonError::into_inner).take(Instant::now())
+}
+
 fn track_path(action: i32, tool_type: i32, x: f32, y: f32) {
     if tool_type != tool::STYLUS && tool_type != tool::ERASER {
         return;
@@ -113,6 +122,13 @@ fn track_path(action: i32, tool_type: i32, x: f32, y: f32) {
             path.push((x, y));
         }
         _ => {}
+    }
+}
+
+fn track_age(action: i32, tool_type: i32, age_ms: i32) {
+    if (tool_type == tool::STYLUS || tool_type == tool::ERASER) && matches!(action, motion::action::DOWN | motion::action::MOVE) {
+        let age = Duration::from_millis(u64::try_from(age_ms).unwrap_or(0));
+        AGES.lock().unwrap_or_else(PoisonError::into_inner).record(Instant::now(), age);
     }
 }
 
@@ -184,7 +200,8 @@ pub fn install(callback: impl Fn(Option<Sample>) + Send + Sync + 'static) -> Res
 }
 
 /// One pointer of a `MotionEvent`, from `PhotoCraftActivity.nativePen` (Java). Called on the
-/// Activity's UI thread. JNI types: `jint` is `i32`, `jfloat` is `f32`.
+/// Activity's UI thread. JNI types: `jint` is `i32`, `jfloat` is `f32`. `age_ms` is the time
+/// since the digitizer event (`SystemClock.uptimeMillis() - MotionEvent.getEventTime()`).
 ///
 /// Never unwinds: the mapping doesn't panic and [`deliver`] contains the callback.
 #[unsafe(no_mangle)]
@@ -199,8 +216,10 @@ pub extern "system" fn Java_ai_storyteller_photocraft_PhotoCraftActivity_nativeP
     orientation: f32,
     x: f32,
     y: f32,
+    age_ms: i32,
 ) {
     saw_pen(tool);
+    track_age(action, tool, age_ms);
     track_controls(action, tool, buttons, x, y);
     track_path(action, tool, x, y);
     let e = RawEvent { action, tool, buttons, pressure, tilt, orientation };
