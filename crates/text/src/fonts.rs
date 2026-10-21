@@ -761,7 +761,6 @@ mod fontconfig_tests {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Folders the font scan reads besides the platform's ([`add_font_dir`]).
 static EXTRA_FONT_DIRS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
 
@@ -774,6 +773,7 @@ pub fn add_font_dir(dir: std::path::PathBuf) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
     let home = std::env::var_os("HOME").map(PathBuf::from);
