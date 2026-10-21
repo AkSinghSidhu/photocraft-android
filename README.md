@@ -47,16 +47,16 @@ tools, dialogs, and the Shortcut Pad.
 |---|---|
 | <img src="docs/images/studio-mode.png" width="492" alt="Studio Mode on a tablet: menu bar, toolbars, floating panels and the canvas"> | <img src="docs/images/simple-mode.png" width="492" alt="Simple Mode on a tablet: round buttons in the top corners, the tool rail with colour dots on the left, size and opacity pills at the bottom centre, the layers palette on the right edge and the mode switch at the bottom left"> |
 
-Shipped so far (2026-10-21), laid out like the CSP Simple Mode reference:
+Shipped so far (2026-10-21):
 
 - **Mode switch both ways:** View › UI Mode in the menu bar, a round switch button at the
   bottom-left of Simple Mode, and — on touch devices — the desktop toolbar's Screen Mode slot
   becomes the switch into Simple Mode.
-- **Floating touch shell in Simple Mode:** menu button, open button and a tips (lightbulb)
-  button on the top-left; undo, redo, save and a "…" quick-actions card on the top-right
-  (New, Open, Quick Export as PNG, Export As…, Save); the tool rail open at the top of the
-  left edge with a drawing-colour dot (opens the colour picker), a paper-white dot and a
-  transparent-colour dot (swaps to the eraser) under it; double-tap a tool for its options.
+- **A clean touch surface:** round shape tools at the top of the left edge, floating buttons in
+  the top corners — menu, open and a tips button on the left; undo, redo, save and a "…"
+  quick-actions card on the right (New, Open, Quick Export as PNG, Export As…, Save) — with a
+  drawing-colour dot (opens the colour picker), a paper-white dot and a transparent-colour dot
+  (swaps to the eraser) under the tools. Double-tapping a tool shows its options.
 - **Size and opacity as pill sliders at the bottom centre** (the active tool's, dimmed when
   the tool has no size/opacity; the Fill tool gets its fill opacity).
 - **The layers palette at the right edge:** a plus button, a layer action sheet (New Layer,
@@ -70,8 +70,7 @@ To do (next improvement pass):
 1. A brush preset picker with previews in the Simple shell (the colour dot and its picker are
    in; presets are not).
 2. Layer actions still to add to the sheet: rename and blend mode.
-3. The menu's document list is frequent-to-hand already (top-left, one tap); folding quick
-   actions into it next.
+3. Quick actions (New, Open, Export) also on the menu's front page.
 4. Always-visible tool settings (not behind a double-tap), with contextual controls for
    selection and Type.
 5. 48 dp hit areas for rows in the overlay cards (round buttons are 44 pt; check physical
