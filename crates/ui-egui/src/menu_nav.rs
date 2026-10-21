@@ -413,6 +413,30 @@ fn heading(from: Pos2, p: Pos2, target: Rect) -> bool {
 }
 
 /// Is the pointer over `rect` on this ui's layer (not under a submenu drawn on top)?
+fn arrows_id() -> egui::Id {
+    egui::Id::new("pc-menu-scroll-arrows")
+}
+
+/// Note a scroll arrow drawn this frame (kept for the next frame's [`on_scroll_arrow`]).
+fn remember_arrow(ctx: &egui::Context, rect: Rect) {
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data_mut(|d| {
+        let list = d.get_temp_mut_or_default::<(u64, Vec<Rect>)>(arrows_id());
+        if list.0 != frame {
+            *list = (frame, Vec::new());
+        }
+        list.1.push(rect);
+    });
+}
+
+/// Whether this frame's click (where it was pressed) is on a menu's scroll arrow, as drawn last
+/// frame: the menu stays open for it, though menus otherwise close on any click.
+pub fn on_scroll_arrow(ctx: &egui::Context) -> bool {
+    let Some(p) = ctx.input(|i| i.pointer.press_origin().or(i.pointer.interact_pos())) else { return false };
+    let frame = ctx.cumulative_frame_nr();
+    ctx.data(|d| d.get_temp::<(u64, Vec<Rect>)>(arrows_id())).is_some_and(|(at, rects)| at + 2 >= frame && rects.iter().any(|r| r.contains(p)))
+}
+
 fn pointer_on(ui: &Ui, rect: Rect) -> bool {
     ui.ctx().pointer_hover_pos().is_some_and(|p| rect.contains(p) && ui.ctx().layer_id_at(p) == Some(ui.layer_id()))
 }
@@ -515,11 +539,17 @@ pub fn level(ui: &mut Ui, depth: usize, nav: &mut Nav, rows: impl FnOnce(&mut Ui
         };
         ui.painter().add(egui::Shape::convex_polygon(tri, if live { t.text } else { t.text_faint.gamma_multiply(0.5) }, egui::Stroke::NONE));
         let id = key.with(dir < 0.0);
-        let r = ui.interact(strip, id, Sense::hover());
+        // A click too: on a touch screen the arrow is tapped, not rested on. A tap scrolls most of
+        // a page, and isn't the click that closes the menu ([`on_scroll_arrow`]).
+        let r = ui.interact(strip, id, Sense::click());
+        remember_arrow(&ctx, strip);
+        if live && r.clicked() {
+            target = (offset + dir * height * 0.75).clamp(0.0, max);
+        }
         let label = if dir < 0.0 { "Scroll menu up" } else { "Scroll menu down" };
         r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, live, tl!(label)));
         if live && pointer_on(ui, strip) {
-            target = (offset + dir * SPEED * dt.max(1.0 / 120.0)).clamp(0.0, max);
+            target = (target + dir * SPEED * dt.max(1.0 / 120.0)).clamp(0.0, max);
             ctx.request_repaint();
         }
         // The wheel scrolls over the arrows too.

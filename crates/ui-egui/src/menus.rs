@@ -1191,7 +1191,8 @@ pub fn menu_bar(app: &mut PhotocraftApp, ui: &mut egui::Ui) -> f32 {
                 // The release ending the press that opened this menu is a click "outside" the
                 // popup: it must not close it again.
                 let opening = title.clicked() && ui.ctx().data(|d| d.get_temp::<bool>(press_gesture_id())).unwrap_or(false);
-                let close = if opening {
+                let close = if opening || crate::menu_nav::on_scroll_arrow(ui.ctx()) {
+                    // Tapping a long menu's scroll arrow scrolls it; it isn't a click to close.
                     egui::PopupCloseBehavior::IgnoreClicks
                 } else if *top == "Help" {
                     // Menus close on any click, inside them too; a click in Help's search field
