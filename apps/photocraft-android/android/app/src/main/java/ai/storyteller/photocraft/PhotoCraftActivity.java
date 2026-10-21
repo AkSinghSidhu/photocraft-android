@@ -222,6 +222,10 @@ public class PhotoCraftActivity extends GameActivity {
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             int i = e.getActionIndex();
+            if (isPen(e.getToolType(i))) {
+                // Pen samples as the digitizer reports them, not batched to the next frame.
+                getWindow().getDecorView().requestUnbufferedDispatch(e);
+            }
             try {
                 nativePointer(e.getPointerId(i), e.getToolType(i), e.getButtonState());
             } catch (UnsatisfiedLinkError err) {
