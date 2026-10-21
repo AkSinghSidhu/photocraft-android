@@ -43,29 +43,35 @@ at runtime from View › UI Mode, drawn in PhotoCraft's own theme. The Classic d
 untouched and everything Simple doesn't draw keeps working: the canvas with all gestures and
 tools, dialogs, and the Shortcut Pad.
 
-Shipped so far (2026-10-20):
+Shipped so far (2026-10-21), laid out like the CSP Simple Mode reference:
 
 - **Mode switch both ways:** View › UI Mode in the menu bar, a round switch button at the
   bottom-left of Simple Mode, and — on touch devices — the desktop toolbar's Screen Mode slot
   becomes the switch into Simple Mode.
-- **Floating touch shell in Simple Mode:** menu button (top-left: recent documents and the full
-  command set, page by page), undo / redo / save (top right), the tool rail at the left edge
-  (double-tap a tool for its options), size and opacity sliders and the layers strip at the
-  right edge, and the document tab bar away while working.
+- **Floating touch shell in Simple Mode:** menu button, open button and a tips (lightbulb)
+  button on the top-left; undo, redo, save and a "…" quick-actions card on the top-right
+  (New, Open, Quick Export as PNG, Export As…, Save); the tool rail open at the top of the
+  left edge with a drawing-colour dot (opens the colour picker), a paper-white dot and a
+  transparent-colour dot (swaps to the eraser) under it; double-tap a tool for its options.
+- **Size and opacity as pill sliders at the bottom centre** (the active tool's, dimmed when
+  the tool has no size/opacity; the Fill tool gets its fill opacity).
+- **The layers palette at the right edge:** a plus button, a layer action sheet (New Layer,
+  Duplicate…, Delete…, an opacity slider), a square-thumbnail stack with the active layer
+  ringed, per-layer eye overlay, and a caret that collapses it.
 - **The Android Shortcut Pad hides while Simple Mode is on** — the shell owns the screen edge
   there; Studio Mode keeps the pad exactly as before.
 
 To do (next improvement pass):
 
-1. A colour swatch and a brush preset picker with previews in the Simple shell.
-2. A collapsible layers card that adapts to portrait, landscape and split-screen.
-3. A layer action sheet: rename, duplicate, delete, opacity, blend mode.
-4. A frequent-first menu: New, Open, Export, Transform and selection actions up front; the full
-   desktop hierarchy deeper in.
-5. Always-visible tool settings (not behind a double-tap), with contextual controls for
+1. A brush preset picker with previews in the Simple shell (the colour dot and its picker are
+   in; presets are not).
+2. Layer actions still to add to the sheet: rename and blend mode.
+3. The menu's document list is frequent-to-hand already (top-left, one tap); folding quick
+   actions into it next.
+4. Always-visible tool settings (not behind a double-tap), with contextual controls for
    selection and Type.
-6. 48 dp hit areas for buttons and rows (they are 44/40 pt today; check physical scaling on
-   each display).
+5. 48 dp hit areas for rows in the overlay cards (round buttons are 44 pt; check physical
+   scaling on each display).
 
 Details, build steps and what isn't supported yet:
 [apps/photocraft-android/README.md](apps/photocraft-android/README.md). The Android work lives on
