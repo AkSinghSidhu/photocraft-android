@@ -157,7 +157,15 @@ pub fn handle_with(e: &RawEvent, erases: [bool; 4]) -> Update {
         }
         // Keep the last sample through the lift: the stroke's final points still need it.
         action::UP | action::POINTER_UP => Update::Keep,
-        action::CANCEL | action::HOVER_ENTER | action::HOVER_MOVE | action::HOVER_EXIT => Update::Set(None),
+        // Hovering: no pressure, but the end (or eraser button) in use is known, so the eraser
+        // switch happens before the stroke, as on the desktop (AppKit proximity).
+        action::HOVER_ENTER | action::HOVER_MOVE => {
+            let mut s = sample(e);
+            s.pressure = 0.0;
+            s.eraser = controls(e.tool, e.buttons).iter().zip(erases).any(|(used, erases)| *used && erases);
+            Update::Set(Some(s))
+        }
+        action::CANCEL | action::HOVER_EXIT => Update::Set(None),
         _ => Update::Keep,
     }
 }
@@ -214,13 +222,14 @@ mod tests {
 
     #[test]
     fn a_pen_contact_reports_pressure_until_it_hovers() {
-        assert_eq!(handle(&pen(action::HOVER_ENTER, 0.0)), Update::Set(None));
+        assert!(matches!(handle(&pen(action::HOVER_ENTER, 0.0)), Update::Set(Some(Sample { pressure: 0.0, eraser: false, .. }))));
         let Update::Set(Some(s)) = handle(&pen(action::DOWN, 0.25)) else { panic!("down is a sample") };
         assert_eq!((s.pressure, s.eraser), (0.25, false));
         let Update::Set(Some(s)) = handle(&pen(action::MOVE, 0.75)) else { panic!("move is a sample") };
         assert_eq!(s.pressure, 0.75);
         assert_eq!(handle(&pen(action::UP, 0.0)), Update::Keep, "the lift keeps the last pressure");
-        assert_eq!(handle(&pen(action::HOVER_MOVE, 0.0)), Update::Set(None));
+        assert!(matches!(handle(&pen(action::HOVER_MOVE, 0.4)), Update::Set(Some(Sample { pressure: 0.0, .. }))), "hovering has no pressure");
+        assert_eq!(handle(&pen(action::HOVER_EXIT, 0.0)), Update::Set(None));
         assert_eq!(handle(&pen(action::CANCEL, 0.5)), Update::Set(None));
         assert_eq!(handle(&pen(42, 0.5)), Update::Keep, "unknown actions change nothing");
     }
@@ -255,6 +264,17 @@ mod tests {
         assert!(!erases(tool::STYLUS, 0, [true; 4]), "the plain tip");
         assert!(erases(tool::ERASER, 0, [false, false, false, true]) && !erases(tool::ERASER, 0, [true, true, true, false]), "the eraser end");
         assert_eq!(controls(tool::MOUSE, button::SECONDARY), [false; 4], "a mouse has no pen controls");
+    }
+
+    #[test]
+    fn hovering_tells_which_end_erases_before_the_stroke() {
+        let hover = |tool, buttons| {
+            let e = RawEvent { action: action::HOVER_MOVE, tool, buttons, ..Default::default() };
+            matches!(handle_with(&e, [true, false, false, true]), Update::Set(Some(Sample { eraser: true, pressure: 0.0, .. })))
+        };
+        assert!(hover(tool::STYLUS, button::STYLUS_PRIMARY), "the erasing button, hovering");
+        assert!(hover(tool::ERASER, 0), "the eraser end, hovering");
+        assert!(!hover(tool::STYLUS, 0) && !hover(tool::STYLUS, button::STYLUS_SECONDARY), "the tip, or a button that doesn't erase");
     }
 
     #[test]

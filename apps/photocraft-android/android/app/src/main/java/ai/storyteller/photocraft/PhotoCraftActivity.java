@@ -16,6 +16,7 @@ import android.view.MotionEvent;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -72,6 +73,9 @@ public class PhotoCraftActivity extends GameActivity {
      * palm rejection; photocraft-tablet's android.rs). */
     private static native void nativePointer(int id, int tool, int buttons);
 
+    /** The on-screen keyboard's height in pixels (0: hidden), for photocraft-tablet's android.rs. */
+    private static native void nativeImeHeight(int px);
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
     private File bridge;
@@ -111,7 +115,24 @@ public class PhotoCraftActivity extends GameActivity {
         }
         hideSystemBars();
         handleSentDocument(getIntent());
+        // The on-screen keyboard's height, so the app lays out above it instead of under it.
+        android.view.View decor = getWindow().getDecorView();
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(decor);
+            int ime = insets == null ? 0 : insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            if (ime != lastImeHeight) {
+                lastImeHeight = ime;
+                try {
+                    nativeImeHeight(ime);
+                } catch (UnsatisfiedLinkError err) {
+                    // The library isn't loaded yet: the next layout tells it.
+                    lastImeHeight = -1;
+                }
+            }
+        });
     }
+
+    private int lastImeHeight = -1;
 
     @Override
     protected void onResume() {

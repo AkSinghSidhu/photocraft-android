@@ -166,6 +166,14 @@ impl eframe::App for Shell {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // The on-screen keyboard takes the bottom of the window: the app lays out in what's left
+        // above it (panels, menus and dialogs alike), as apps that resize for the keyboard do.
+        let ime = photocraft_tablet::android::ime_height_px() / ctx.pixels_per_point();
+        if ime > 1.0
+            && let Some(r) = &mut raw_input.screen_rect
+        {
+            r.max.y = (r.max.y - ime).max(r.min.y + r.height() * 0.3);
+        }
         if self.pad.take_keyboard_tap() {
             self.soft_keyboard = !self.soft_keyboard;
             if self.soft_keyboard {
@@ -185,12 +193,19 @@ impl eframe::App for Shell {
             self.soft_keyboard = false;
             self.pad.keyboard_on = false;
         }
-        let editing = ctx.egui_wants_keyboard_input();
+        // A text field, or the Type tool editing text on the canvas (no egui field has focus
+        // then, but its typing comes the same way: text and Backspace/Enter events).
+        let canvas_text = self.app.ui.text_edit.is_some();
+        let editing = ctx.egui_wants_keyboard_input() || canvas_text;
         if editing && !self.editing {
             // A field just gained focus. Multi-line, so the keyboard's Enter key types a newline
             // into the text state (an editor action would be dropped by winit), which
             // `ime::diff` turns into Enter.
             self.reset_keyboard(InputType::TYPE_TEXT_FLAG_MULTI_LINE);
+            if canvas_text {
+                // winit opens the keyboard only for egui's own fields.
+                self.android.show_soft_input(false);
+            }
         }
         if !editing && self.editing {
             if self.soft_keyboard {

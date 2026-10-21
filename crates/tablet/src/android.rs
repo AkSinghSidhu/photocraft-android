@@ -36,6 +36,8 @@ static PRESSES: Mutex<Vec<Press>> = Mutex::new(Vec::new());
 static PATH: Mutex<Vec<(f32, f32)>> = Mutex::new(Vec::new());
 /// The most [`PATH`] holds (a second of a fast digitizer, if nothing takes it).
 const PATH_MAX: usize = 480;
+/// Whether the hovering pen's last sample erased, so hover moves send only changes.
+static HOVER_END: Mutex<Option<bool>> = Mutex::new(None);
 /// The button state of the pen's last event, as Android reported it ([`last_buttons`]).
 static LAST_BUTTONS: Mutex<i32> = Mutex::new(0);
 
@@ -51,6 +53,21 @@ pub struct Press {
 /// button, a pen's side button.
 pub fn pointer_buttons(id: u64) -> i32 {
     POINTERS.lock().unwrap_or_else(PoisonError::into_inner).buttons(id)
+}
+
+/// The on-screen keyboard's height in window pixels (0 when it's hidden).
+static IME_HEIGHT: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+/// The on-screen keyboard's height in window pixels, 0 when it's hidden: the app lays out above
+/// it (the Activity reports it on every layout change, `PhotoCraftActivity.nativeImeHeight`).
+pub fn ime_height_px() -> f32 {
+    IME_HEIGHT.load(std::sync::atomic::Ordering::Relaxed).max(0) as f32
+}
+
+/// The keyboard's height changed, from `PhotoCraftActivity.nativeImeHeight` (Java).
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ai_storyteller_photocraft_PhotoCraftActivity_nativeImeHeight(_env: *mut c_void, _this: *mut c_void, px: i32) {
+    IME_HEIGHT.store(px, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// The tool of touch `id` (`MotionEvent.getToolType()`), if it was reported.
@@ -188,6 +205,20 @@ pub extern "system" fn Java_ai_storyteller_photocraft_PhotoCraftActivity_nativeP
     track_path(action, tool, x, y);
     let e = RawEvent { action, tool, buttons, pressure, tilt, orientation };
     if let Update::Set(sample) = handle_with(&e, *ERASES.lock().unwrap_or_else(PoisonError::into_inner)) {
+        // Hovering, only a change of end (or of an erasing button) is news: a hover move every
+        // few milliseconds would crowd the frame's samples.
+        let hovering = matches!(action, motion::action::HOVER_ENTER | motion::action::HOVER_MOVE);
+        let mut last = HOVER_END.lock().unwrap_or_else(PoisonError::into_inner);
+        if hovering {
+            let end = sample.map(|s| s.eraser);
+            if action == motion::action::HOVER_MOVE && *last == end {
+                return;
+            }
+            *last = end;
+        } else {
+            *last = None;
+        }
+        drop(last);
         let guard = SINK.lock().unwrap_or_else(PoisonError::into_inner);
         if let Some(sink) = guard.as_ref() {
             deliver(sink.as_ref(), sample);
