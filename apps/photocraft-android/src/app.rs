@@ -66,7 +66,9 @@ fn run(android: AndroidApp) -> Result<(), String> {
             crate::services::watch_incoming(bridge.clone(), inbox, cc.egui_ctx.clone());
             let mut app = PhotocraftApp::new(Session::new(), services);
             app.background_jobs = true;
-            app.set_theme(&cc.egui_ctx, ThemeKind::Pro);
+            // No theme set here: `set_theme` saves its choice as the preference, and this ran
+            // before the saved preferences load, so it replaced the user's theme on every start.
+            // The first frame applies the saved one (Preferences › Interface), as on the desktop.
             // The pen's pressure comes from the Activity; a finger's touch "force" is its
             // contact size, which would paint near-invisible strokes.
             app.stylus.touch_force = false;
