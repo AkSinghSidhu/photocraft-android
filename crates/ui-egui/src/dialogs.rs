@@ -121,7 +121,7 @@ fn show_modal<T>(
     id: egui::Id,
     resizable: Option<egui::Vec2>,
     interactive: bool,
-    compact: bool,
+    compact: Option<f32>,
     contents: impl FnOnce(&mut egui::Ui) -> T,
 ) -> egui::ModalResponse<T> {
     modal.show(ctx, |ui| {
@@ -129,15 +129,14 @@ fn show_modal<T>(
         if !interactive {
             ui.disable();
         }
-        if let Some(size) = resizable.filter(|_| !compact) {
+        if let Some(size) = resizable.filter(|_| compact.is_none()) {
             // Never a minimum bigger than the window.
             let room = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(240.0, 200.0));
             let min = egui::vec2(560.0, 400.0).min(room);
             let max = room.max(min);
             egui::Resize::default().id(id.with("resize")).default_size(size.min(max)).min_size(min).max_size(max).show(ui, contents)
-        } else if compact {
-            // The phone layout: a dialog taller than the window scrolls, OK and Cancel included.
-            let h = (ctx.content_rect().height() - 40.0).max(120.0);
+        } else if let Some(h) = compact {
+            // The phone layout: a dialog taller than `h` scrolls, OK and Cancel included.
             egui::ScrollArea::vertical().id_salt(id.with("compact-scroll")).max_height(h).min_scrolled_height(h).show(ui, contents).inner
         } else {
             contents(ui)
@@ -198,7 +197,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // The phone layout keeps dialogs centred: a place remembered from a bigger window could
         // be off this one.
         let phone = app.compact_layout;
+        // In the phone layout a dialog whose work is on the canvas (Blur Gallery's pins) sits at
+        // the bottom, at most 40% of the window tall, so the image stays in view above it.
+        let on_canvas = phone && crate::blur_pins::owns(&d.fields);
+        let screen_h = ctx.content_rect().height();
+        let phone_height = phone.then(|| if on_canvas { (screen_h * 0.4).max(160.0) } else { (screen_h - 40.0).max(120.0) });
         let area = match start {
+            _ if on_canvas => egui::Modal::default_area(id).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0)),
             Some(offset) if !phone => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
             _ => egui::Modal::default_area(id),
         };
@@ -222,7 +227,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
         // The phone layout has no resize grip: the dialog fits the window and scrolls.
         let resizable = resizable_dialog(&fields).filter(|_| !phone);
-        let modal = show_modal(modal, ctx, id, resizable, interactive, phone, |ui| {
+        let modal = show_modal(modal, ctx, id, resizable, interactive, phone_height, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title

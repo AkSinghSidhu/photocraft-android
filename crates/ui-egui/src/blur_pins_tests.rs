@@ -425,3 +425,33 @@ fn alt_reset_starts_again_from_one_pin() {
     let p = pins(&fields)[0];
     assert_eq!((p.x, p.y, p.tilt.map(|t| t.angle)), (0.5, 0.5, Some(0.0)));
 }
+
+/// The phone layout: Iris Blur's dialog sits at the bottom, at most 40% of the window tall, so
+/// the iris above it stays in reach (an Android phone report).
+#[test]
+fn on_a_phone_the_dialog_leaves_the_image_in_view() {
+    let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+    app.compact_layout = true;
+    app.run("file.new", json!({"width": 400, "height": 300})).unwrap();
+    app.sync_views();
+    let screen = egui::Rect::from_min_size(Pos2::ZERO, vec2(400.0, 800.0));
+    let mut h = Harness::builder().with_size(screen.size()).build_ui_state(
+        |ui, app: &mut PhotocraftApp| {
+            let ctx = ui.ctx().clone();
+            if !ctx.fonts(|f| f.families().contains(&egui::FontFamily::Name("medium".into()))) {
+                return;
+            }
+            egui::CentralPanel::default().show(ui, |ui| crate::canvas::document_area(app, ui));
+            crate::dialogs::show(app, &ctx);
+        },
+        app,
+    );
+    PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+    h.run_steps(4);
+    crate::filter_dialog::open(h.state_mut(), IRIS).unwrap();
+    h.run_steps(6);
+    let id = h.state().ui.dialogs[0].id;
+    let window = h.ctx.memory(|m| m.area_rect(egui::Id::new(("dialog", id)))).expect("the Iris Blur window");
+    assert!(screen.contains_rect(window), "{window:?} inside {screen:?}");
+    assert!(window.top() >= screen.height() * 0.5, "at the bottom, the image above it in view: {window:?}");
+}
