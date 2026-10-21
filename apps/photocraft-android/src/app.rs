@@ -111,6 +111,7 @@ fn run(android: AndroidApp) -> Result<(), String> {
                 touch,
                 layout,
                 pen_path: Vec::new(),
+                toggled_from: None,
                 drawn: Default::default(),
                 trace_logged: None,
             }))
@@ -179,6 +180,8 @@ struct Shell {
     font_outcome: crate::fonts::Outcome,
     /// Touch gestures and their settings (see [`crate::touch`]).
     touch: crate::touch::TouchInput,
+    /// The tool a pen button's "Switch to Eraser and back" left, to return to.
+    toggled_from: Option<photocraft_ui_egui::Tool>,
     /// Pen sample positions not yet put into a frame (see [`crate::pen_path`]).
     pen_path: Vec<(f32, f32)>,
     /// Phone or tablet layout (see [`crate::layout`]).
@@ -295,6 +298,18 @@ impl eframe::App for Shell {
         let presses = android::take_presses();
         for p in &presses {
             let setting = config.pen(p.control);
+            if setting.action == PenAction::ToggleEraser {
+                // One press to the Eraser, the next back to the tool it came from.
+                use photocraft_ui_egui::Tool;
+                let ui = &mut self.app.ui;
+                if ui.tool == Tool::Eraser {
+                    ui.tool = self.toggled_from.take().unwrap_or(Tool::Brush);
+                } else {
+                    self.toggled_from = Some(ui.tool);
+                    ui.tool = Tool::Eraser;
+                }
+                continue;
+            }
             if setting.action != PenAction::Shortcut {
                 continue;
             }

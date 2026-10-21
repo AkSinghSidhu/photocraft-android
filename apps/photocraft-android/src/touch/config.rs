@@ -44,6 +44,9 @@ pub enum PenAction {
     /// In use, the pen erases (the Eraser tool, back to the previous tool after).
     #[default]
     Eraser,
+    /// A press switches to the Eraser; the next press switches back. For pens that can't draw
+    /// with a button held (the S Pen).
+    ToggleEraser,
     /// A right-click under the pen: pressed while hovering, or held while touching.
     RightClick,
     /// A press runs a shortcut.
@@ -53,11 +56,12 @@ pub enum PenAction {
 }
 
 impl PenAction {
-    pub const ALL: [PenAction; 4] = [PenAction::Eraser, PenAction::RightClick, PenAction::Shortcut, PenAction::Nothing];
+    pub const ALL: [PenAction; 5] = [PenAction::Eraser, PenAction::ToggleEraser, PenAction::RightClick, PenAction::Shortcut, PenAction::Nothing];
 
     pub fn label(self) -> &'static str {
         match self {
-            PenAction::Eraser => "Erase",
+            PenAction::Eraser => "Erase while held",
+            PenAction::ToggleEraser => "Switch to Eraser and back",
             PenAction::RightClick => "Right-click",
             PenAction::Shortcut => "Run a shortcut",
             PenAction::Nothing => "Nothing",
