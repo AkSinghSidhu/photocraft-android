@@ -1,0 +1,103 @@
+name: Android APK
+
+# Builds the arm64-v8a APK like apps/photocraft-android/build.sh does locally, and attaches it
+# to the matching pre-release when the run is a tag push (android-v<version>[-<build>]).
+#
+# Signing: the release APK is signed with the *same debug keystore* local builds use
+# (Gradle's default ~/.android/debug.keystore), restored from the ANDROID_DEBUG_KEYSTORE
+# secret (the keystore, base64-encoded). Without it an installed copy would refuse the
+# CI-built update (INSTALL_FAILED_UPDATE_INCOMPATIBLE). A fresh checkout without the secret
+# fails the keystore step on purpose rather than shipping an incompatibly-signed APK.
+
+on:
+  push:
+    tags: ["android-v*"]
+  workflow_dispatch:
+    inputs:
+      build:
+        description: "Release build number appended to the version, e.g. 10 (empty: skip)"
+        type: string
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Restore the debug keystore
+        env:
+          KEYSTORE: ${{ secrets.ANDROID_DEBUG_KEYSTORE }}
+        run: |
+          if [[ -z "$KEYSTORE" ]]; then
+              echo "::error::ANDROID_DEBUG_KEYSTORE secret missing (the repo's debug keystore, base64-encoded)"
+              exit 1
+          fi
+          mkdir -p "$HOME/.android"
+          printf '%s' "$KEYSTORE" | base64 -d > "$HOME/.android/debug.keystore"
+          test -s "$HOME/.android/debug.keystore"
+
+      - name: Build the APK
+        env:
+          ANDROID_HOME: /usr/local/lib/android/sdk
+        run: |
+          # The same NDK/build versions the local build pins (r28.2, platform 35): sdkmanager
+          # skips what the runner already has, and installs what it is missing.
+          sdkmanager --install "ndk;28.2.13676358" "platforms;android-35" "build-tools;35.0.0" > /dev/null
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
+
+          # The build number: explicit input, else the tail of a tag android-v<version>-<build>
+          # against the Cargo.toml version.
+          VERSION="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          BUILD="${{ inputs.build }}"
+          if [[ -z "$BUILD" && "${GITHUB_REF_TYPE:-push}" == "tag" && "${GITHUB_REF_NAME}" == "android-v$VERSION-"* ]]; then
+              BUILD="${GITHUB_REF_NAME#android-v$VERSION-}"
+          fi
+          [[ "$BUILD" != "0" ]] || BUILD=""
+
+          : "${CARGO_HOME:=$HOME/.cargo}"   # neutral path remaps live inside build.sh
+          RELEASE_BUILD="$BUILD" bash apps/photocraft-android/build.sh
+
+          echo "APK_PATH=$(ls -t target/android/photocraft-*-arm64-v8a.apk | head -1)" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: ${{ env.APK_PATH }}
+          if-no-files-found: error
+
+      - name: Attach the APK to its release
+        if: github.ref_type == 'tag'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+              gh release upload "$GITHUB_REF_NAME" "$APK_PATH" --repo "$GITHUB_REPOSITORY" --clobber
+          else
+              gh release create "$GITHUB_REF_NAME" "$APK_PATH" --repo "$GITHUB_REPOSITORY" \
+                  --title "PhotoCraft for Android ${GITHUB_REF_NAME#android-v}" \
+                  --prerelease --generate-notes
+          fi
