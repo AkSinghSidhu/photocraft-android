@@ -314,22 +314,16 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                 {
                     let _ = crate::menus::invoke(app, &ctx, "select.editInQuickMaskMode", json!({}));
                 }
-                // Desktop keeps Photoshop's Screen Mode slot; on touch platforms (Android
-                // tablets) the slot is the entry into Simple Mode instead.
-                let sm = if !app.services.touch {
-                    icons::button_with_icon_size_tip(ui, "app-window", bx, (bx * 0.52).round(), false, tl!("Change Screen Mode  (F)"), tool_tips)
-                } else {
-                    icons::button_with_icon_size_tip(ui, "arrow-left-right", bx, (bx * 0.52).round(), false, tl!("Switch to Simple Mode"), tool_tips)
-                };
-                if app.services.touch {
-                    if sm.clicked() {
-                        let _ = crate::menus::invoke(app, &ctx, "view.uiMode.simple", json!({}));
-                    }
-                } else {
+                // Desktop keeps Photoshop's Screen Mode slot; on touch platforms the slot is
+                // the entry into Simple Mode instead — except the phone layout, where the
+                // right control strip already holds the switch.
+                if !app.services.touch {
+                    let sm = icons::button_with_icon_size_tip(ui, "app-window", bx, (bx * 0.52).round(), false, tl!("Change Screen Mode  (F)"), tool_tips);
                     paint_toolbar_flyout_indicator(ui, &t, &sm);
 
-                    // Right-click, or click and hold like the tool flyouts (#4444), lists the modes,
-                    // like Photoshop's flyout. The release that ends a hold doesn't cycle the mode.
+                    // Right-click, or click and hold like the tool flyouts (#4444), lists the
+                    // modes, like Photoshop's flyout. The release that ends a hold doesn't
+                    // cycle the mode.
                     let held_id = sm.id.with("held");
                     let was_held = ui.data(|d| d.get_temp::<bool>(held_id)).unwrap_or(false);
                     let held_for = sm.is_pointer_button_down_on().then(|| ui.input(|i| i.pointer.press_start_time().map(|t0| i.time - t0))).flatten();
@@ -371,6 +365,11 @@ pub fn toolbar(app: &mut PhotocraftApp, ui: &mut egui::Ui) {
                             }
                         }
                     });
+                } else if !app.compact_layout {
+                    let sm = icons::button_with_icon_size_tip(ui, "arrow-left-right", bx, (bx * 0.52).round(), false, tl!("Switch to Simple Mode"), tool_tips);
+                    if sm.clicked() {
+                        let _ = crate::menus::invoke(app, &ctx, "view.uiMode.simple", json!({}));
+                    }
                 }
             });
         });
@@ -5571,6 +5570,39 @@ mod type_flyout_tests {
         frame(&mut app, &ctx, 1.15, vec![]);
         assert!(app.ui.view.simple(), "tapping the swapped slot enters Simple Mode");
         assert_eq!(crate::view_cmds::checked(&app, "view.screenMode.standard"), Some(true), "the screen mode is untouched");
+    }
+
+    /// The phone layout carries the switch on its right control strip: the toolbar's slot is
+    /// gone there (no second copy of the fullscreen button on the left by the canvas edge).
+    #[test]
+    fn on_the_phone_layout_the_toolbar_has_no_simple_mode_slot() {
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        let ctx = egui::Context::default();
+        PhotocraftApp::setup_context(&ctx, crate::theme::ThemeKind::ALL[0]);
+        app.services.touch = true;
+        app.compact_layout = true;
+        frame(&mut app, &ctx, 0.0, vec![]);
+        frame(&mut app, &ctx, 0.1, vec![]);
+        let bx = if Tokens::get(&ctx).pro { 30.0 } else { 36.0 };
+        // Where the desktop slot would sit: the toolbar's last clickable button, as the
+        // switched-slot test above finds it. With the slot hidden that is the plain Quick
+        // Mask — tapping it must never run the mode change.
+        let at = ctx
+            .viewport(|v| {
+                v.prev_pass
+                    .widgets
+                    .layers()
+                    .flat_map(|(_, w)| w.iter())
+                    .filter(|w| w.rect.size() == egui::Vec2::splat(bx) && w.sense.senses_click())
+                    .max_by(|a, b| a.rect.top().total_cmp(&b.rect.top()).then(a.rect.left().total_cmp(&b.rect.left())))
+                    .map(|w| w.rect.center())
+            })
+            .unwrap();
+        let pointer = |pos, pressed| egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: Default::default() };
+        frame(&mut app, &ctx, 1.0, vec![egui::Event::PointerMoved(at), pointer(at, true)]);
+        frame(&mut app, &ctx, 1.05, vec![pointer(at, false)]);
+        frame(&mut app, &ctx, 1.1, vec![]);
+        assert!(!app.ui.view.simple(), "the phone layout's toolbar ends at Quick Mask — no slot to switch modes with");
     }
 
     /// Every text drawn in one toolbar frame.

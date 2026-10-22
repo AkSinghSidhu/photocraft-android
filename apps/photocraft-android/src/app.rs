@@ -53,6 +53,9 @@ fn run(android: AndroidApp) -> Result<(), String> {
             photocraft_text::fonts::add_font_dir(crate::fonts::fonts_dir(&files_dir));
             let mut services = crate::services::services(bridge.clone(), &files_dir);
             services.inbox = Some(inbox.clone());
+            // Everything runs on a touch surface: the shell swaps the desktop's mouse-only
+            // toolbar slots (the screen-mode slot becomes the Simple Mode switch).
+            services.touch = true;
             // The Shortcut Pad (Window › Shortcut Pad) and updates (Help › Check for Updates…):
             // their menu rows go to the app's menus.
             let pad = crate::pad::Pad::new(&files_dir);
