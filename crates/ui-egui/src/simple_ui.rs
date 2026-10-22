@@ -65,6 +65,7 @@ fn swap_button(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// Top-right: undo, redo and save at touch size, floating over the canvas.
 fn edit_cluster(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let (button, gap) = top_metrics(ctx);
     let undo = app.session.is_enabled("edit.undo");
     let redo = app.session.is_enabled("edit.redo");
     let doc = app.session.active().is_some();
@@ -72,13 +73,17 @@ fn edit_cluster(app: &mut PhotocraftApp, ctx: &egui::Context) {
     egui::Area::new(egui::Id::new("pc-simple-edit-cluster")).order(egui::Order::Middle).anchor(Align2::RIGHT_TOP, vec2(-MARGIN, MARGIN)).constrain(false).show(
         ctx,
         |ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
+            ui.spacing_mut().item_spacing.x = gap;
             ui.horizontal(|ui| {
-                command_button(ui, app, ctx, undo, "undo-2", "Undo", "edit.undo");
-                command_button(ui, app, ctx, redo, "redo-2", "Redo", "edit.redo");
-                command_button(ui, app, ctx, doc, "save", "Save", "file.save");
+                for cmd in [
+                    ClusterCommand { icon: "undo-2", label: "Undo", id: "edit.undo", enabled: undo },
+                    ClusterCommand { icon: "redo-2", label: "Redo", id: "edit.redo", enabled: redo },
+                    ClusterCommand { icon: "save", label: "Save", id: "file.save", enabled: doc },
+                ] {
+                    command_button(ui, app, ctx, cmd, button);
+                }
                 let on = ctx.data(|d| d.get_temp::<bool>(quick_id)).unwrap_or(false);
-                let quick = round_button(ui, "ellipsis", "Quick actions", on);
+                let quick = round_button_sized(ui, "ellipsis", "Quick actions", on, button);
                 if quick.clicked() {
                     ctx.data_mut(|d| d.insert_temp(quick_id, !on));
                 }
@@ -89,18 +94,27 @@ fn edit_cluster(app: &mut PhotocraftApp, ctx: &egui::Context) {
 
 /// A round command button that runs a command on tap; dimmed rather than hidden when disabled,
 /// so the cluster doesn't shift as edits happen.
-fn command_button(ui: &mut egui::Ui, app: &mut PhotocraftApp, ctx: &egui::Context, enabled: bool, icon: &str, label: &str, id: &str) {
-    if !enabled {
+/// One corner-cluster command: icon, translated label, menu id, and whether it's enabled
+/// (dimmed rather than hidden so the cluster never shifts as edits happen).
+struct ClusterCommand<'a> {
+    icon: &'a str,
+    label: &'a str,
+    id: &'a str,
+    enabled: bool,
+}
+
+fn command_button(ui: &mut egui::Ui, app: &mut PhotocraftApp, ctx: &egui::Context, cmd: ClusterCommand, button: f32) {
+    if !cmd.enabled {
         let t = Tokens::get(ui.ctx());
-        let (rect, _) = ui.allocate_exact_size(Vec2::splat(BUTTON), Sense::hover());
-        ui.painter().circle_filled(rect.center(), BUTTON * 0.5 - 1.0, t.dock);
-        ui.painter().circle_stroke(rect.center(), BUTTON * 0.5 - 1.0, Stroke::new(1.0, t.card_border));
-        crate::icons::paint(ui, rect, icon, (BUTTON * 0.5).round(), t.text_dim);
+        let (rect, _) = ui.allocate_exact_size(Vec2::splat(button), Sense::hover());
+        ui.painter().circle_filled(rect.center(), button * 0.5 - 1.0, t.dock);
+        ui.painter().circle_stroke(rect.center(), button * 0.5 - 1.0, Stroke::new(1.0, t.card_border));
+        crate::icons::paint(ui, rect, cmd.icon, (button * 0.5).round(), t.text_dim);
         return;
     }
-    let resp = round_button(ui, icon, label, false);
+    let resp = round_button_sized(ui, cmd.icon, cmd.label, false, button);
     if resp.clicked()
-        && let Err(e) = crate::menus::invoke(app, ctx, id, serde_json::json!({}))
+        && let Err(e) = crate::menus::invoke(app, ctx, cmd.id, serde_json::json!({}))
     {
         app.ui.status = e;
         app.ui.status_error = true;
@@ -208,19 +222,24 @@ fn tips(app: &mut PhotocraftApp, ctx: &egui::Context) {
 /// against any document, hover feedback, and a labelled widget so the shell and tests see it.
 /// Selected buttons (the rail's active tool) get the accent treatment.
 fn round_button(ui: &mut egui::Ui, icon: &str, tooltip: &str, selected: bool) -> egui::Response {
+    round_button_sized(ui, icon, tooltip, selected, BUTTON)
+}
+
+/// [`round_button`] at an explicit size (the corner clusters tighten on phone widths).
+fn round_button_sized(ui: &mut egui::Ui, icon: &str, tooltip: &str, selected: bool, button: f32) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(BUTTON), Sense::click());
-    ui.painter().circle_filled(rect.center(), BUTTON * 0.5 - 1.0, if selected { t.accent_soft } else { t.dock });
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(button), Sense::click());
+    ui.painter().circle_filled(rect.center(), button * 0.5 - 1.0, if selected { t.accent_soft } else { t.dock });
     if resp.hovered() && !selected {
-        ui.painter().circle_filled(rect.center(), BUTTON * 0.5 - 1.0, t.hover);
+        ui.painter().circle_filled(rect.center(), button * 0.5 - 1.0, t.hover);
     }
     ui.painter().circle_stroke(
         rect.center(),
-        BUTTON * 0.5 - 1.0,
+        button * 0.5 - 1.0,
         Stroke::new(if selected { 2.0 } else { 1.0 }, if selected { t.accent_border } else { t.card_border }),
     );
     let tint = if selected || resp.hovered() { t.text } else { t.icon };
-    crate::icons::paint(ui, rect, icon, (BUTTON * 0.5).round(), tint);
+    crate::icons::paint(ui, rect, icon, (button * 0.5).round(), tint);
     resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, tl!(tooltip)));
     resp.on_hover_text(tl!(tooltip))
 }
@@ -602,16 +621,33 @@ fn menu_row_label(tap: &MenuTap) -> String {
     }
 }
 
+/// The corner clusters' button size and gap at the window's width: on a phone the three
+/// left-side and four right-side buttons must fit side by side (16 pt margins + four 44 pt
+/// buttons + tight gaps need 360 pt; below that the buttons step down to 36 pt — still a
+/// fillable touch target).
+fn top_metrics(ctx: &egui::Context) -> (f32, f32) {
+    let w = ctx.input(|i| i.viewport_rect().width());
+    let fit = |size: f32, gap: f32| MARGIN * 2.0 + 7.0 * size + 5.0 * gap;
+    if fit(BUTTON, 12.0) <= w {
+        (BUTTON, 12.0)
+    } else if fit(BUTTON, 4.0) <= w {
+        (BUTTON, 4.0)
+    } else {
+        (36.0, 4.0)
+    }
+}
+
 /// The top corners (the reference shell's layout): Menu / Open / tips at the left, the
 /// undo / redo / save cluster with the quick actions at the right, floating over the canvas.
 fn top_bar(app: &mut PhotocraftApp, ctx: &egui::Context) {
+    let (button, gap) = top_metrics(ctx);
     let mut nav = ctx.data_mut(|d| d.get_temp::<MenuNav>(menu_nav_id()).unwrap_or_default());
     egui::Area::new(egui::Id::new("pc-simple-menu-btn")).order(egui::Order::Middle).anchor(Align2::LEFT_TOP, vec2(MARGIN, MARGIN)).constrain(false).show(
         ctx,
         |ui| {
-            ui.spacing_mut().item_spacing.x = 12.0;
+            ui.spacing_mut().item_spacing.x = gap;
             ui.horizontal(|ui| {
-                let menu = round_button(ui, "menu", "Menu", nav.open);
+                let menu = round_button_sized(ui, "menu", "Menu", nav.open, button);
                 if menu.clicked() {
                     nav = MenuNav { open: !nav.open, sub: None };
                 }
@@ -1132,13 +1168,13 @@ mod tests {
     /// The top row's left cluster's `index`th button (0 the menu, 1 open, 2 the tips).
     fn top_left(ctx: &egui::Context, index: usize) -> egui::Pos2 {
         let a = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-menu-btn"))).unwrap();
-        at2(a.left() + index as f32 * (BUTTON + 12.0) + BUTTON * 0.5, a.top() + BUTTON * 0.5)
+        at2(a.left() + index as f32 * (BUTTON + top_metrics(ctx).1) + BUTTON * 0.5, a.top() + BUTTON * 0.5)
     }
 
     /// The top row's right cluster's `index`th button (0 undo, 1 redo, 2 save, 3 quick actions).
     fn top_right(ctx: &egui::Context, index: usize) -> egui::Pos2 {
         let a = ctx.memory(|m| m.area_rect(egui::Id::new("pc-simple-edit-cluster"))).unwrap();
-        at2(a.right() - (BUTTON * 0.5) - index as f32 * (BUTTON + 12.0), a.top() + BUTTON * 0.5)
+        at2(a.right() - (BUTTON * 0.5) - index as f32 * (BUTTON + top_metrics(ctx).1), a.top() + BUTTON * 0.5)
     }
 
     fn tap(app: &mut PhotocraftApp, ctx: &egui::Context, time: f64, pos: egui::Pos2) {
@@ -1155,6 +1191,27 @@ mod tests {
         frame_size(app, ctx, time + 0.01, vec![pointer(pos, true)], size);
         frame_size(app, ctx, time + 0.05, vec![pointer(pos, false)], size);
         frame_size(app, ctx, time + 0.1, vec![], size);
+    }
+
+    /// The corner clusters fit at a phone's width: every round button stays on screen and none
+    /// overlaps another (the reference shell keeps all commands reachable on a narrow window).
+    #[test]
+    fn phone_width_keeps_corner_buttons_apart() {
+        let (mut app, ctx) = app_with_doc();
+        frame_size(&mut app, &ctx, 0.0, vec![], vec2(392.0, 844.0));
+        frame_size(&mut app, &ctx, 0.1, vec![], vec2(392.0, 844.0));
+        let rects = buttons(&ctx);
+        assert!(rects.len() >= 8, "the top clusters and rail draw buttons: got {rects:?}");
+        for r in &rects {
+            assert!(r.left() >= 0.0 && r.right() <= 392.0, "button {r:?} runs off the phone width");
+        }
+        for a in &rects {
+            for b in &rects {
+                if a != b {
+                    assert!(!a.intersects(*b), "{a:?} overlaps {b:?}");
+                }
+            }
+        }
     }
 
     #[test]

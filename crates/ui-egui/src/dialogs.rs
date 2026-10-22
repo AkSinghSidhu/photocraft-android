@@ -104,16 +104,24 @@ fn older_dialog_above(ctx: &egui::Context, live: egui::LayerId, dialogs: &[Dialo
     ctx.memory(|m| m.layer_ids().skip_while(|l| *l != live).skip(1).any(|l| others.contains(&l)))
 }
 
-fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> bool {
-    fields.contains_key("__web") || crate::prefs_ui::is_preferences(fields)
+/// The size a resizable dialog opens at, or `None` for a dialog sized by its contents.
+fn resizable_dialog(fields: &serde_json::Map<String, Value>) -> Option<egui::Vec2> {
+    if crate::prefs_ui::is_preferences(fields) {
+        Some(crate::prefs_ui::PREFERENCES_SIZE)
+    } else if fields.contains_key("__web") {
+        Some(egui::vec2(960.0, 900.0))
+    } else {
+        None
+    }
 }
 
 fn show_modal<T>(
     modal: egui::Modal,
     ctx: &egui::Context,
     id: egui::Id,
-    resizable: bool,
+    resizable: Option<egui::Vec2>,
     interactive: bool,
+    compact: Option<f32>,
     contents: impl FnOnce(&mut egui::Ui) -> T,
 ) -> egui::ModalResponse<T> {
     modal.show(ctx, |ui| {
@@ -121,14 +129,15 @@ fn show_modal<T>(
         if !interactive {
             ui.disable();
         }
-        if resizable {
-            let max = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(560.0, 400.0));
-            egui::Resize::default()
-                .id(id.with("resize"))
-                .default_size(egui::vec2(960.0, 900.0).min(max))
-                .min_size(egui::vec2(560.0, 400.0))
-                .max_size(max)
-                .show(ui, contents)
+        if let Some(size) = resizable.filter(|_| compact.is_none()) {
+            // Never a minimum bigger than the window.
+            let room = (ctx.content_rect().size() - egui::vec2(40.0, 40.0)).max(egui::vec2(240.0, 200.0));
+            let min = egui::vec2(560.0, 400.0).min(room);
+            let max = room.max(min);
+            egui::Resize::default().id(id.with("resize")).default_size(size.min(max)).min_size(min).max_size(max).show(ui, contents)
+        } else if let Some(h) = compact {
+            // The phone layout: a dialog taller than `h` scrolls, OK and Cancel included.
+            egui::ScrollArea::vertical().id_salt(id.with("compact-scroll")).max_height(h).min_scrolled_height(h).show(ui, contents).inner
         } else {
             contents(ui)
         }
@@ -185,9 +194,18 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         let mut drag = egui::Vec2::ZERO;
         let mut close_clicked = false;
         let mut sizing = false;
+        // The phone layout keeps dialogs centred: a place remembered from a bigger window could
+        // be off this one.
+        let phone = app.compact_layout;
+        // In the phone layout a dialog whose work is on the canvas (Blur Gallery's pins) sits at
+        // the bottom, at most 40% of the window tall, so the image stays in view above it.
+        let on_canvas = phone && crate::blur_pins::owns(&d.fields);
+        let screen_h = ctx.content_rect().height();
+        let phone_height = phone.then(|| if on_canvas { (screen_h * 0.4).max(160.0) } else { (screen_h - 40.0).max(120.0) });
         let area = match start {
-            Some(offset) => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
-            None => egui::Modal::default_area(id),
+            _ if on_canvas => egui::Modal::default_area(id).anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, -8.0)),
+            Some(offset) if !phone => egui::Modal::default_area(id).anchor(egui::Align2::LEFT_TOP, offset),
+            _ => egui::Modal::default_area(id),
         };
         // Only the last dialog takes input, and egui only lets the modal drawn on top take input,
         // so the last one must be drawn above the others. egui can raise an older one (it raises an
@@ -207,7 +225,9 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
         // Photoshop doesn't dim the window behind dialogs: previews must be judged at true contrast.
         let web = fields.contains_key("__web");
         let web_popup_open = web && egui::Popup::is_any_open(ctx);
-        let modal = show_modal(modal, ctx, id, resizable_dialog(&fields), interactive, |ui| {
+        // The phone layout has no resize grip: the dialog fits the window and scrolls.
+        let resizable = resizable_dialog(&fields).filter(|_| !phone);
+        let modal = show_modal(modal, ctx, id, resizable, interactive, phone_height, |ui| {
             sizing = ui.is_sizing_pass();
             let available = ui.available_size();
             // A dialog of a few short fields (`__compact`, Fit Image) is narrower (#4673): the title
@@ -215,20 +235,24 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             let compact = d.fields.contains_key("__compact");
             // The curve editor caps its graph allocation at 300 points (#5113).
             let curves = fields.get("__adjust").and_then(Value::as_str) == Some("curves");
+            // No minimum is wider than the window (a phone held upright).
+            let fit = (ctx.content_rect().width() - 24.0).max(240.0);
             if !compact {
-                ui.set_min_width(if curves { 300.0 } else { 380.0 });
+                ui.set_min_width((if curves { 300.0 } else { 380.0_f32 }).min(fit));
             }
-            let wide = crate::prefs_ui::width(&d.fields, (ctx.content_rect().width() - 48.0).max(380.0));
+            // A resizable dialog's contents fill its resizable area (#7420), the others the window.
+            let room = if resizable.is_some() { available.x } else { (ctx.content_rect().width() - 48.0).max(240.0) };
+            let wide = crate::prefs_ui::width(&d.fields, room);
             if let Some(w) = wide {
-                ui.set_min_width(w.min(460.0));
+                ui.set_min_width(w.min(460.0).min(fit));
             }
             if d.kind == DialogKind::NewDocument {
-                ui.set_min_width(800.0);
+                ui.set_min_width(800.0_f32.min(fit));
             }
             // The About window: room for the contributor table, the same width on every tab.
             let about_tabs = d.kind == DialogKind::About && d.fields.get("systemInfo").and_then(Value::as_bool) != Some(true);
             if about_tabs {
-                ui.set_min_width(700.0);
+                ui.set_min_width(700.0_f32.min(fit));
             }
             ui.set_max_width(wide.unwrap_or(if d.kind == DialogKind::NewDocument {
                 800.0
@@ -258,6 +282,11 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
             }
             if color_picker {
                 ui.set_width(crate::color_picker_ui::CONTENT_WIDTH);
+            } else if phone && !web {
+                // The phone layout: every dialog takes the window's width (less its frame).
+                let full = (ctx.content_rect().width() - 48.0).max(240.0);
+                ui.set_min_width(full);
+                ui.set_max_width(full);
             }
             let label = egui::Label::new(egui::RichText::new(&title).font(crate::theme::semibold(15.0))).selectable(false);
             let t = if crate::color_picker_ui::owns(&fields) { ui.add_sized(egui::vec2(ui.available_width(), 22.0), label).rect } else { ui.add(label).rect };
@@ -321,6 +350,7 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::channel_options_ui::owns_new_spot(&fields) => crate::channel_options_ui::new_spot_body(ui, &mut fields),
                 DialogKind::Command if crate::shape_dialog::owns(&fields) => crate::shape_dialog::body(app, ui, &mut fields),
                 DialogKind::Command if crate::delete_layer_prompt::owns(&fields) => crate::delete_layer_prompt::body(ui, &mut fields),
+                DialogKind::Command if crate::disk_change_prompt::owns(&fields) => crate::disk_change_prompt::body(ui, &fields),
                 DialogKind::Command if crate::actions::owns_insert_stop(&fields) => crate::actions::insert_stop_body(ui, &mut fields),
                 DialogKind::Command if crate::new_layer_ui::owns(&fields) => crate::new_layer_ui::body(ui, &mut fields),
                 DialogKind::Command if crate::mask_trash_prompt::owns(&fields) => crate::mask_trash_prompt::body(ui, &fields),
@@ -330,10 +360,13 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                 DialogKind::Command if crate::tool_reset::owns(&fields) => crate::tool_reset::body(ui),
                 DialogKind::Command if crate::crop_presets::owns(&fields) => crate::crop_presets::body(app, ui, &mut fields),
                 DialogKind::Command if crate::variables_ui::owns(&fields) => crate::variables_ui::body(app, ui, &mut fields),
-                DialogKind::Command if crate::file_ui::owns(&fields) => crate::file_ui::body(app, ui, &mut fields),
+                DialogKind::Command if crate::file_ui::owns(&fields) => crate::file_ui::body(app, ui, &mut fields, d.id),
                 DialogKind::Command if crate::color_picker_ui::owns(&fields) => {
                     outcome = crate::color_picker_ui::body(ui, &mut fields);
                     crate::color_picker_ui::take_add_swatch(app, &mut fields);
+                    if let Some(web) = fields.get("__webOnly").and_then(Value::as_bool) {
+                        app.ui.color_panel.web_only = web;
+                    }
                 }
                 DialogKind::Command if crate::color_range_ui::owns(&fields) => crate::color_range_ui::body(app, ui, &mut fields),
                 DialogKind::Command if crate::prefs_ui::owns(&fields) => crate::prefs_ui::body(app, ui, &mut fields),
@@ -401,6 +434,8 @@ pub fn show(app: &mut PhotocraftApp, ctx: &egui::Context) {
                             tl!("Create")
                         } else if crate::delete_layer_prompt::owns(&d.fields) {
                             tl!("Delete")
+                        } else if crate::disk_change_prompt::owns(&d.fields) {
+                            tl!("Replace")
                         } else if d.fields.contains_key("__export") {
                             tl!("Export")
                         } else {
@@ -614,6 +649,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
         DialogKind::Command if crate::channel_options_ui::owns_new_spot(&d.fields) => crate::channel_options_ui::confirm_new_spot(app, &d.fields),
         DialogKind::Command if crate::shape_dialog::owns(&d.fields) => crate::shape_dialog::confirm(app, &d.fields),
         DialogKind::Command if crate::delete_layer_prompt::owns(&d.fields) => crate::delete_layer_prompt::confirm(app, &d.fields),
+        DialogKind::Command if crate::disk_change_prompt::owns(&d.fields) => crate::disk_change_prompt::confirm(app, &d.fields),
         DialogKind::Command if crate::actions::owns_insert_stop(&d.fields) => crate::actions::insert_stop_confirm(app, &d.fields),
         DialogKind::Command if crate::new_layer_ui::owns(&d.fields) => crate::new_layer_ui::confirm(app, &d.fields),
         DialogKind::Command if crate::mask_trash_prompt::owns(&d.fields) => crate::mask_trash_prompt::confirm(app, &d.fields),
@@ -652,7 +688,7 @@ pub fn confirm(app: &mut PhotocraftApp, id: u64) -> Result<Value, String> {
             if result.is_ok() {
                 crate::filter_dialog::remember(app, &cmd, &d.fields);
                 // A step dialog of a playing action: the action continues after it.
-                crate::actions::resume(app, &d.fields);
+                crate::actions::resume(app, &d.fields)?;
             }
             result
         }
@@ -1094,6 +1130,32 @@ mod tests {
         assert_eq!(radius(&h), Some(5.0), "a cancelled 9 is not remembered");
     }
 
+    /// The phone layout: Preferences, the widest dialog, fits a phone held upright and its OK
+    /// stays reachable.
+    #[test]
+    fn phone_layout_dialogs_fit_the_window() {
+        use egui_kittest::kittest::Queryable;
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        app.compact_layout = true;
+        let screen = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 760.0));
+        let mut h = egui_kittest::Harness::builder().with_size(screen.size()).build_ui_state(|ui, app| show(app, ui.ctx()), app);
+        PhotocraftApp::setup_context(&h.ctx, crate::theme::ThemeKind::ALL[0]);
+        let mut wide = Vec::new();
+        for (section, _) in photocraft_engine::prefs::SECTIONS {
+            h.state_mut().ui.dialogs.clear();
+            h.run_steps(1);
+            let d = crate::prefs_ui::open_preferences(h.state_mut(), section);
+            h.run_steps(4);
+            let window = h.ctx.memory(|m| m.area_rect(egui::Id::new(("dialog", d)))).expect("the Preferences window");
+            if !screen.contains_rect(window) {
+                wide.push(format!("{section}: {:.0}", window.width()));
+            } else {
+                assert!(window.contains_rect(h.get_by_label("OK").rect()), "{section}: OK {:?} inside the window {window:?}", h.get_by_label("OK").rect());
+            }
+        }
+        assert!(wide.is_empty(), "sections wider than the phone's {:.0}: {wide:?}", screen.width());
+    }
+
     /// #4673: File › Automate › Fit Image holds two numbers and a check box, so its window is as
     /// wide as that content and its buttons, not the 380-point floor of the larger dialogs.
     #[test]
@@ -1125,9 +1187,68 @@ mod preference_resize_tests {
         let ordinary = json!({});
         let web = json!({"__web": true});
 
-        assert!(resizable_dialog(prefs.as_object().unwrap()));
-        assert!(!resizable_dialog(shortcuts.as_object().unwrap()));
-        assert!(!resizable_dialog(ordinary.as_object().unwrap()));
-        assert!(resizable_dialog(web.as_object().unwrap()));
+        assert_eq!(resizable_dialog(prefs.as_object().unwrap()), Some(crate::prefs_ui::PREFERENCES_SIZE));
+        assert_eq!(resizable_dialog(shortcuts.as_object().unwrap()), None);
+        assert_eq!(resizable_dialog(ordinary.as_object().unwrap()), None);
+        assert_eq!(resizable_dialog(web.as_object().unwrap()), Some(egui::vec2(960.0, 900.0)));
+    }
+
+    /// Drags the dialog's resize grip (its frame's bottom-right corner) by `by`.
+    fn drag_corner(h: &mut egui_kittest::Harness<'_, PhotocraftApp>, by: egui::Vec2) {
+        let corner = frame(h).max - egui::vec2(14.0, 14.0);
+        h.event(egui::Event::PointerMoved(corner));
+        h.step();
+        h.event(egui::Event::PointerButton { pos: corner, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE });
+        h.step();
+        h.event(egui::Event::PointerMoved(corner + by));
+        h.step();
+        h.event(egui::Event::PointerButton { pos: corner + by, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE });
+        h.run_steps(4);
+    }
+
+    fn frame(h: &egui_kittest::Harness<'_, PhotocraftApp>) -> egui::Rect {
+        let rects: Vec<egui::Rect> = h.ctx.data(|m| m.get_temp(egui::Id::new(RECTS))).unwrap();
+        rects[0]
+    }
+
+    /// The button row sits in the frame's bottom-right corner (its order follows the platform):
+    /// the contents fill the dialog, no empty space.
+    fn assert_buttons_in_corner(h: &egui_kittest::Harness<'_, PhotocraftApp>, when: &str) {
+        use egui_kittest::kittest::Queryable;
+        let f = frame(h);
+        let row = ["OK", "Cancel", "Apply"].map(|l| h.get_by_label(l).rect()).into_iter().reduce(|a, b| a.union(b)).unwrap();
+        // Inside the frame (not past its edge) and near it.
+        let near = |gap: f32| (0.0..24.0).contains(&gap);
+        assert!(near(f.bottom() - row.bottom()) && near(f.right() - row.right()), "{when}: frame {f:?}, buttons {row:?}");
+    }
+
+    #[test]
+    fn preferences_contents_follow_the_dialog_when_it_is_resized() {
+        // #7420: the dialog resized but its contents kept a size from the window, leaving the
+        // buttons part-way up a dialog that opened, or was dragged, larger than them.
+        let mut app = PhotocraftApp::new(photocraft_engine::Session::new(), crate::Services::default());
+        crate::prefs_ui::open_preferences(&mut app, "interface");
+        let mut h = egui_kittest::Harness::builder().with_size(egui::vec2(1600.0, 1000.0)).build_ui_state(
+            |ui, app| {
+                if ui.ctx().fonts(|f| f.families().contains(&egui::FontFamily::Name("semibold".into()))) {
+                    show(app, ui.ctx());
+                }
+            },
+            app,
+        );
+        PhotocraftApp::setup_context(&h.ctx, Default::default());
+        h.run_steps(5);
+        assert_buttons_in_corner(&h, "on open");
+        let opened = frame(&h);
+        drag_corner(&mut h, egui::vec2(220.0, 80.0));
+        assert!(frame(&h).width() > opened.width() + 150.0 && frame(&h).height() > opened.height() + 50.0, "wider: {:?}", frame(&h));
+        assert_buttons_in_corner(&h, "wider");
+        drag_corner(&mut h, egui::vec2(-500.0, -300.0));
+        let smaller = frame(&h);
+        assert!(smaller.width() < opened.width() - 200.0 && smaller.height() < opened.height() - 150.0, "smaller: {smaller:?}");
+        assert_buttons_in_corner(&h, "smaller");
+        // The contents never ask for more than the dialog gives them, so it keeps its size.
+        h.run_steps(10);
+        assert_eq!(frame(&h), smaller);
     }
 }

@@ -20,7 +20,12 @@
 //!   finger swiping up or down on a draggable row or slider in a scrolling list (the Brushes,
 //!   Layers and preset lists, whose rows reorder when dragged) scrolls the list too; holding
 //!   still first ([`LONG_PRESS`]) then dragging reorders, and a sideways drag moves a slider.
-//!   A scroll keeps gliding after the fingers lift.
+//!   A scroll keeps gliding after the fingers lift. A sideways swipe on a strip that scrolls
+//!   sideways (the options bar, when wider than the window) scrolls it the same way.
+//! - A finger held still on the interface right-clicks (egui's press-and-hold, which needs the
+//!   finger's touch events: the router passes on the pointer finger's, without its contact-size
+//!   "force", which would read as a pen). A mouse's right button, and a pen whose side button is
+//!   set to right-click, press the secondary button.
 //! - Palm rejection: fingers that land while the pen is down or near are ignored, and a pen
 //!   touching down drops the fingers already resting.
 //!
@@ -28,10 +33,11 @@
 //! it was moving: a flicked menu or list keeps gliding.
 
 use crate::touch::config::{FingerMode, TouchConfig};
-use egui::{Event, Modifiers, MouseWheelUnit, Pos2, Rect, TouchId, TouchPhase, Vec2, pos2, vec2};
+use egui::{Event, Modifiers, MouseWheelUnit, PointerButton, Pos2, Rect, TouchId, TouchPhase, Vec2, pos2, vec2};
 
-/// The pad's width in points.
+/// The pad's width in points, and in the phone layout.
 pub const WIDTH: f32 = 72.0;
+pub const COMPACT_WIDTH: f32 = 56.0;
 const MARGIN: f32 = 6.0;
 /// A key's height when the pad has room; keys shrink evenly towards [`MIN_KEY_H`] to fit.
 const KEY_H: f32 = 44.0;
@@ -50,6 +56,8 @@ pub enum Control {
     Center,
     /// The always-present key at the bottom that opens the on-screen keyboard.
     Keyboard,
+    /// The always-present key above it that enters and leaves full screen.
+    ScreenMode,
     /// The pad's background: touches there do nothing (and don't reach the canvas).
     Panel,
 }
@@ -65,6 +73,8 @@ pub struct Layout {
     pub ring_inner: f32,
     /// The on-screen keyboard key, at the very bottom.
     pub keyboard: Rect,
+    /// The full screen key, just above it.
+    pub screen_mode: Rect,
 }
 
 impl Layout {
@@ -74,8 +84,9 @@ impl Layout {
     pub fn new(full: Rect, count: usize) -> Self {
         let w = (full.width() - 2.0 * MARGIN).max(1.0);
         let keyboard = Rect::from_min_size(pos2(full.left() + MARGIN, full.bottom() - MARGIN - KEYBOARD_H), vec2(w, KEYBOARD_H));
-        // The keys and wheel share what is left above it.
-        let panel = Rect::from_min_max(full.min, pos2(full.right(), (keyboard.top() - GAP).max(full.top())));
+        let screen_mode = Rect::from_min_size(pos2(full.left() + MARGIN, keyboard.top() - GAP - KEYBOARD_H), vec2(w, KEYBOARD_H));
+        // The keys and wheel share what is left above them.
+        let panel = Rect::from_min_max(full.min, pos2(full.right(), (screen_mode.top() - GAP).max(full.top())));
         let wheel = w;
         let above = count.div_ceil(2);
         let below = count / 2;
@@ -98,7 +109,7 @@ impl Layout {
             keys.push(Rect::from_min_size(pos2(x, y), vec2(w, key_h)));
             y += key_h + GAP;
         }
-        Self { panel: full, keys, center, ring_outer: wheel / 2.0, ring_inner: wheel * 0.3, keyboard }
+        Self { panel: full, keys, center, ring_outer: wheel / 2.0, ring_inner: wheel * 0.3, keyboard, screen_mode }
     }
 
     /// The keys' height (the same for all).
@@ -111,6 +122,9 @@ impl Layout {
     pub fn hit(&self, p: Pos2) -> Control {
         if self.keyboard.expand(GAP / 2.0).contains(p) {
             return Control::Keyboard;
+        }
+        if self.screen_mode.expand(GAP / 2.0).contains(p) {
+            return Control::ScreenMode;
         }
         let d = p.distance(self.center);
         if d <= self.ring_inner {
@@ -151,6 +165,8 @@ pub enum Routed {
     View(ViewMove),
     /// A quick tap with this many fingers on the canvas.
     Tap(usize),
+    /// A sideways swipe moved the scrolling strip (the options bar) this far, in points.
+    StripScroll(f32),
 }
 
 /// What the router needs to know besides the events.
@@ -165,6 +181,12 @@ pub struct Env<'a> {
     /// Whether a point is on a draggable row or slider inside a scrolling list (as laid out last
     /// frame): a swipe there scrolls rather than drags.
     pub list_item: &'a dyn Fn(Pos2) -> bool,
+    /// Whether a pen or mouse touch presses the secondary button (a mouse's right button, a pen's
+    /// side button set to right-click).
+    pub secondary: &'a dyn Fn(TouchId) -> bool,
+    /// A strip that scrolls sideways (the options bar running past the window's width), as laid
+    /// out last frame: a sideways swipe there scrolls it.
+    pub scroll_strip: Option<Rect>,
     /// The frame's time, in seconds.
     pub now: f64,
 }
@@ -218,12 +240,17 @@ struct Hold {
     since: f64,
     /// On a list row: a vertical swipe scrolls, and grabbing needs [`LONG_PRESS`].
     list: bool,
+    /// On a sideways-scrolling strip: a sideways swipe scrolls, and grabbing needs
+    /// [`LONG_PRESS`].
+    strip: bool,
 }
 
 /// A scroll gliding on after the fingers lifted (under the pointer, left where they lifted).
 #[derive(Clone, Copy, Debug)]
 struct Glide {
     velocity: Vec2,
+    /// Glides the strip rather than wheeling what's under the pointer.
+    strip: bool,
 }
 
 /// The canvas fingers from the first one down to the last one up (for taps).
@@ -256,6 +283,8 @@ pub struct Router {
     /// Fingers scrolling the interface (two anywhere, or one swiping a list): their last centre,
     /// and recent centres with their times (for the glide).
     scroll: Option<Pos2>,
+    /// The axes the scroll moves (a strip scrolls only sideways).
+    scroll_axes: Vec2,
     trail: Vec<(f64, Pos2)>,
     glide: Option<Glide>,
     /// The previous frame's time (the glide's step).
@@ -267,15 +296,29 @@ pub struct Router {
     locked: bool,
     /// The pointer was released last frame and is still to be taken away.
     gone_pending: bool,
+    /// The pointer pressed the secondary button.
+    secondary: bool,
+    /// The interface finger whose touch events reach egui (for press-and-hold), as last sent.
+    forwarded: Option<Event>,
 }
 
-fn pointer_down(out: &mut Vec<Routed>, pos: Pos2) {
+fn pointer_down(out: &mut Vec<Routed>, pos: Pos2, button: PointerButton) {
     out.push(Routed::App(Event::PointerMoved(pos)));
-    out.push(Routed::App(Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }));
+    out.push(Routed::App(Event::PointerButton { pos, button, pressed: true, modifiers: Modifiers::NONE }));
 }
 
-fn pointer_release(out: &mut Vec<Routed>, pos: Pos2) {
-    out.push(Routed::App(Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: Modifiers::NONE }));
+fn pointer_release(out: &mut Vec<Routed>, pos: Pos2, button: PointerButton) {
+    out.push(Routed::App(Event::PointerButton { pos, button, pressed: false, modifiers: Modifiers::NONE }));
+}
+
+/// A touch event in another phase and without its force (a finger's contact size, which egui
+/// would take for a pen's pressure and so turn press-and-hold off).
+fn unforced(mut e: Event, phase: TouchPhase) -> Event {
+    if let Event::Touch { force, phase: p, .. } = &mut e {
+        *force = None;
+        *p = phase;
+    }
+    e
 }
 
 fn wrap_degrees(d: f32) -> f32 {
@@ -301,12 +344,16 @@ impl Router {
             self.glide = None;
         }
         if let Some(g) = &mut self.glide {
-            out.push(Routed::App(Event::MouseWheel {
-                unit: MouseWheelUnit::Point,
-                delta: g.velocity * dt,
-                phase: TouchPhase::Move,
-                modifiers: Modifiers::NONE,
-            }));
+            if g.strip {
+                out.push(Routed::StripScroll(g.velocity.x * dt));
+            } else {
+                out.push(Routed::App(Event::MouseWheel {
+                    unit: MouseWheelUnit::Point,
+                    delta: g.velocity * dt,
+                    phase: TouchPhase::Move,
+                    modifiers: Modifiers::NONE,
+                }));
+            }
             let speed = g.velocity.length();
             let slower = (speed - GLIDE_FRICTION * dt).max(0.0);
             g.velocity = if speed > 0.0 { g.velocity * (slower / speed) } else { Vec2::ZERO };
@@ -353,7 +400,7 @@ impl Router {
         }
         // A finger held long enough without a second one becomes the pointer.
         if let Some(h) = self.hold
-            && env.now - h.since >= if h.list { LONG_PRESS } else { HOLD_TIME }
+            && env.now - h.since >= if h.list || h.strip { LONG_PRESS } else { HOLD_TIME }
         {
             self.commit(&mut out);
         }
@@ -386,7 +433,8 @@ impl Router {
             if self.primary.is_none() {
                 self.drop_hold();
                 self.primary = Some(id);
-                pointer_down(out, pos);
+                self.secondary = (env.secondary)(id);
+                pointer_down(out, pos, self.button());
             }
             return;
         }
@@ -404,12 +452,20 @@ impl Router {
             Role::Ui => {
                 let others: Vec<TouchId> = self.fingers.iter().filter(|f| f.role == Role::Ui && f.id != id).map(|f| f.id).collect();
                 if others.is_empty() && self.primary.is_none() && self.hold.is_none() {
-                    self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: (env.list_item)(pos) });
+                    let strip = env.scroll_strip.is_some_and(|r| r.contains(pos));
+                    self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: !strip && (env.list_item)(pos), strip });
+                    if env.config.long_press_right_click {
+                        let t = unforced(e, TouchPhase::Start);
+                        out.push(Routed::App(t.clone()));
+                        self.forwarded = Some(t);
+                    }
                 } else if env.config.two_finger_scroll && others.len() == 1 && self.hold.is_some_and(|h| h.id == others[0]) {
                     // Two fingers together over the interface: they scroll, nothing is clicked.
                     self.hold = None;
+                    self.unforward(out);
                     let c = self.center(Role::Ui);
                     self.scroll = Some(c);
+                    self.scroll_axes = vec2(1.0, 1.0);
                     self.trail = vec![(env.now, c)];
                     out.push(Routed::App(Event::PointerMoved(c)));
                 }
@@ -420,7 +476,7 @@ impl Router {
                     self.sequence = Some(Sequence { since: env.now, most: 1, moved: false, gestured: false });
                     self.locked = false;
                     if env.config.finger == FingerMode::Draw && self.primary.is_none() && self.hold.is_none() {
-                        self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: false });
+                        self.hold = Some(Hold { id, start: pos, pos, since: env.now, list: false, strip: false });
                     }
                 } else {
                     // A second finger: a gesture, not a stroke. A finger that had already become
@@ -432,7 +488,7 @@ impl Router {
                         && let Some(f) = self.fingers.iter().find(|f| f.id == p && f.role == Role::Canvas).copied()
                     {
                         self.primary = None;
-                        pointer_release(out, f.pos);
+                        pointer_release(out, f.pos, self.button());
                         self.gone_pending = true;
                     }
                 }
@@ -451,6 +507,10 @@ impl Router {
         let (role, start) = (f.role, f.start);
         if role == Role::Pen {
             out.push(Routed::App(e));
+        } else if self.forwarded_id() == Some(id) {
+            let t = unforced(e, TouchPhase::Move);
+            out.push(Routed::App(t.clone()));
+            self.forwarded = Some(t);
         }
         if let Some(h) = &mut self.hold
             && h.id == id
@@ -460,13 +520,17 @@ impl Router {
                 return;
             }
             let d = pos - h.start;
-            if !(h.list && d.y.abs() > d.x.abs()) {
+            let along_list = h.list && d.y.abs() > d.x.abs();
+            let along_strip = h.strip && d.x.abs() > d.y.abs();
+            if !(along_list || along_strip) {
                 self.commit(out);
                 return;
             }
-            // A swipe along a list scrolls it; nothing is grabbed.
+            // A swipe along a list or strip scrolls it; nothing is grabbed.
+            self.scroll_axes = if along_strip { vec2(1.0, 0.0) } else { vec2(1.0, 1.0) };
             let start = h.start;
             self.hold = None;
+            self.unforward(out);
             self.scroll = Some(start);
             self.trail = vec![(env.now, start)];
             out.push(Routed::App(Event::PointerMoved(start)));
@@ -479,13 +543,19 @@ impl Router {
             Role::Ui => {
                 if let Some(last) = self.scroll {
                     let c = self.center(Role::Ui);
-                    out.push(Routed::App(Event::PointerMoved(c)));
-                    out.push(Routed::App(Event::MouseWheel {
-                        unit: MouseWheelUnit::Point,
-                        delta: c - last,
-                        phase: TouchPhase::Move,
-                        modifiers: Modifiers::NONE,
-                    }));
+                    if self.scroll_axes.y == 0.0 {
+                        // The strip scrolls itself: as the wheel, the dropdown under the finger
+                        // would step through its options instead.
+                        out.push(Routed::StripScroll(c.x - last.x));
+                    } else {
+                        out.push(Routed::App(Event::PointerMoved(c)));
+                        out.push(Routed::App(Event::MouseWheel {
+                            unit: MouseWheelUnit::Point,
+                            delta: c - last,
+                            phase: TouchPhase::Move,
+                            modifiers: Modifiers::NONE,
+                        }));
+                    }
                     self.scroll = Some(c);
                     self.trail.push((env.now, c));
                     self.trail.retain(|(t, _)| env.now - t <= 0.12);
@@ -508,6 +578,9 @@ impl Router {
         let f = self.fingers.remove(i);
         if f.role == Role::Pen {
             out.push(Routed::App(e));
+        } else if self.forwarded_id() == Some(id) {
+            self.forwarded = None;
+            out.push(Routed::App(unforced(e, if lifted { TouchPhase::End } else { TouchPhase::Cancel })));
         }
         if self.hold.is_some_and(|h| h.id == id) {
             // Lifted before it became the pointer: a quick tap (a click, or a dot of paint).
@@ -519,7 +592,7 @@ impl Router {
         }
         if self.primary == Some(id) {
             self.primary = None;
-            pointer_release(out, pos);
+            pointer_release(out, pos, self.button());
             if lifted {
                 // Kept for a frame, so egui sees the flick's speed.
                 self.gone_pending = true;
@@ -533,12 +606,12 @@ impl Router {
                     // Lifted mid-scroll: keep gliding at the fingers' speed.
                     self.scroll = None;
                     let velocity = match (self.trail.first(), self.trail.last()) {
-                        (Some((t0, p0)), Some((t1, p1))) if t1 - t0 > 0.01 => (*p1 - *p0) / (t1 - t0) as f32,
+                        (Some((t0, p0)), Some((t1, p1))) if t1 - t0 > 0.01 => (*p1 - *p0) / (t1 - t0) as f32 * self.scroll_axes,
                         _ => Vec2::ZERO,
                     };
                     self.trail.clear();
                     if lifted && velocity.length() >= GLIDE_MIN {
-                        self.glide = Some(Glide { velocity });
+                        self.glide = Some(Glide { velocity, strip: self.scroll_axes.y == 0.0 });
                     } else {
                         self.gone_pending = true;
                     }
@@ -582,8 +655,9 @@ impl Router {
             return;
         }
         self.primary = Some(h.id);
+        self.secondary = false;
         self.gone_pending = false;
-        pointer_down(out, h.start);
+        pointer_down(out, h.start, self.button());
         if h.pos != h.start {
             out.push(Routed::App(Event::PointerMoved(h.pos)));
         }
@@ -593,17 +667,36 @@ impl Router {
         self.hold = None;
     }
 
+    fn button(&self) -> PointerButton {
+        if self.secondary { PointerButton::Secondary } else { PointerButton::Primary }
+    }
+
+    fn forwarded_id(&self) -> Option<TouchId> {
+        match self.forwarded {
+            Some(Event::Touch { id, .. }) => Some(id),
+            _ => None,
+        }
+    }
+
+    /// The forwarded finger stops being a press: egui forgets its touch (no press-and-hold).
+    fn unforward(&mut self, out: &mut Vec<Routed>) {
+        if let Some(t) = self.forwarded.take() {
+            out.push(Routed::App(unforced(t, TouchPhase::Cancel)));
+        }
+    }
+
     /// A pen came down: fingers already resting are palms. They let go of the pointer and do
     /// nothing until lifted.
     fn reject_fingers(&mut self, out: &mut Vec<Routed>) {
         self.hold = None;
         self.scroll = None;
         self.glide = None;
+        self.unforward(out);
         if let Some(p) = self.primary
             && let Some(f) = self.fingers.iter().find(|f| f.id == p && f.role != Role::Pen).copied()
         {
             self.primary = None;
-            pointer_release(out, f.pos);
+            pointer_release(out, f.pos, self.button());
             out.push(Routed::App(Event::PointerGone));
         }
         for f in &mut self.fingers {
@@ -696,12 +789,14 @@ mod tests {
         Event::Touch { device_id: TouchDeviceId(1), id: TouchId(id), phase, pos, force: Some(1.0) }
     }
 
-    /// Touch ids from 100 up are pens.
+    /// Touch ids from 100 up are pens (from 200 up, a mouse with its right button down).
     fn finger(id: TouchId) -> bool {
         id.0 < 100
     }
 
     const CANVAS: Rect = Rect { min: pos2(100.0, 50.0), max: pos2(900.0, 750.0) };
+    /// A sideways-scrolling strip above the canvas (an options bar wider than the window).
+    const STRIP: Rect = Rect { min: pos2(100.0, 10.0), max: pos2(900.0, 40.0) };
     /// A scrolling list of draggable rows (outside the canvas and the pad).
     const LIST: Rect = Rect { min: pos2(920.0, 100.0), max: pos2(990.0, 600.0) };
 
@@ -721,7 +816,16 @@ mod tests {
         }
         fn route(&mut self, events: Vec<Event>, pad: Option<&Layout>, covered: impl Fn(Pos2) -> bool) -> Vec<Routed> {
             let list = |p: Pos2| LIST.contains(p);
-            let env = Env { canvas: Some(CANVAS), is_finger: &finger, pen_near: self.pen_near, config: &self.config, list_item: &list, now: self.now };
+            let env = Env {
+                canvas: Some(CANVAS),
+                is_finger: &finger,
+                pen_near: self.pen_near,
+                config: &self.config,
+                list_item: &list,
+                secondary: &|id: TouchId| id.0 >= 200,
+                scroll_strip: Some(STRIP),
+                now: self.now,
+            };
             self.r.route(events, pad, covered, &env)
         }
         fn send(&mut self, events: Vec<Event>) -> Vec<Routed> {
@@ -734,10 +838,22 @@ mod tests {
         }
     }
 
+    /// The app's events, less the interface finger's forwarded touches (see [`forwarded`]).
     fn app_events(r: &[Routed]) -> Vec<&Event> {
         r.iter()
             .filter_map(|r| match r {
+                Routed::App(Event::Touch { force: None, .. }) => None,
                 Routed::App(e) => Some(e),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The forwarded touches' phases, for egui's press-and-hold.
+    fn forwarded(r: &[Routed]) -> Vec<TouchPhase> {
+        r.iter()
+            .filter_map(|r| match r {
+                Routed::App(Event::Touch { force: None, phase, .. }) => Some(*phase),
                 _ => None,
             })
             .collect()
@@ -776,6 +892,8 @@ mod tests {
         }
         assert_eq!(l.hit(pos2(l.panel.center().x, l.panel.top() + 2.0)), Control::Panel);
         assert_eq!(l.hit(l.keyboard.center()), Control::Keyboard);
+        assert_eq!(l.hit(l.screen_mode.center()), Control::ScreenMode);
+        assert!(l.screen_mode.bottom() < l.keyboard.top(), "the full screen key sits above the keyboard key");
         assert!(l.panel.contains_rect(l.keyboard) && l.keyboard.bottom() > l.panel.bottom() - 10.0, "at the very bottom");
     }
 
@@ -790,7 +908,7 @@ mod tests {
             for k in &l.keys {
                 assert!(l.panel.contains_rect(*k), "{count} keys: {k:?}");
             }
-            assert!(l.keys.iter().all(|k| k.bottom() < l.keyboard.top()), "{count} keys: above the keyboard key");
+            assert!(l.keys.iter().all(|k| k.bottom() < l.screen_mode.top()), "{count} keys: above the full screen and keyboard keys");
             for pair in l.keys.windows(2) {
                 assert!(pair[0].bottom() <= pair[1].top(), "keys don't overlap");
             }
@@ -1011,7 +1129,7 @@ mod tests {
         let mut g = Rig::new();
         let p = pos2(950.0, 900.0);
         let out = g.route(vec![touch(1, TouchPhase::Start, p)], None, |_| false);
-        assert!(out.is_empty());
+        assert!(app_events(&out).is_empty());
         g.now += HOLD_TIME + 0.01;
         g.route(vec![], None, |_| false);
         let out = g.route(vec![touch(1, TouchPhase::Cancel, p)], None, |_| false);
@@ -1077,6 +1195,103 @@ mod tests {
         assert_eq!(presses(&out), [true]);
         g.send(vec![touch(2, TouchPhase::End, p + vec2(30.0, 3.0))]);
         // A tap still clicks the row.
+        g.wait(1.0);
+        g.send(vec![touch(3, TouchPhase::Start, p)]);
+        assert_eq!(presses(&g.send(vec![touch(3, TouchPhase::End, p)])), [true, false]);
+    }
+
+    #[test]
+    fn an_interface_finger_reaches_egui_as_a_touch_for_press_and_hold() {
+        let mut g = Rig::new();
+        let p = pos2(950.0, 700.0);
+        assert_eq!(forwarded(&g.send(vec![touch(1, TouchPhase::Start, p)])), [TouchPhase::Start]);
+        assert_eq!(forwarded(&g.send(vec![touch(1, TouchPhase::Move, p + vec2(2.0, 0.0))])), [TouchPhase::Move]);
+        assert_eq!(forwarded(&g.send(vec![touch(1, TouchPhase::End, p)])), [TouchPhase::End]);
+        // A second finger makes it a scroll: egui forgets the touch.
+        g.wait(1.0);
+        g.send(vec![touch(2, TouchPhase::Start, p)]);
+        let out = g.send(vec![touch(3, TouchPhase::Start, p + vec2(30.0, 0.0))]);
+        assert_eq!(forwarded(&out), [TouchPhase::Cancel]);
+        g.send(vec![touch(2, TouchPhase::End, p), touch(3, TouchPhase::End, p)]);
+        // Canvas fingers never do, nor any finger with the setting off.
+        g.wait(1.0);
+        assert!(forwarded(&g.send(vec![touch(4, TouchPhase::Start, CANVAS.center())])).is_empty());
+        g.send(vec![touch(4, TouchPhase::End, CANVAS.center())]);
+        let mut g = Rig::with(TouchConfig { long_press_right_click: false, ..Default::default() });
+        assert!(forwarded(&g.send(vec![touch(1, TouchPhase::Start, p)])).is_empty());
+    }
+
+    #[test]
+    fn a_held_finger_right_clicks_in_egui() {
+        let ctx = egui::Context::default();
+        let mut g = Rig::new();
+        let p = pos2(950.0, 700.0);
+        let mut right = false;
+        let mut left = false;
+        let frames: Vec<(f64, Vec<Event>)> = vec![
+            (0.0, vec![]),
+            (0.1, vec![touch(1, TouchPhase::Start, p)]),
+            (0.4, vec![]),
+            (0.8, vec![]),
+            (1.2, vec![]),
+            (1.3, vec![]),
+            (1.4, vec![touch(1, TouchPhase::End, p)]),
+            (1.5, vec![]),
+        ];
+        for (t, events) in frames {
+            g.now = 10.0 + t;
+            let events = app_events_owned(g.send(events));
+            let raw = egui::RawInput { time: Some(t), screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1100.0, 800.0))), events, ..Default::default() };
+            let mut out = ctx.run_ui(raw, |ui| {
+                let r = ui.allocate_rect(Rect::from_center_size(p, vec2(60.0, 60.0)), egui::Sense::click());
+                right |= r.secondary_clicked();
+                left |= r.clicked();
+            });
+            out.textures_delta.clear();
+        }
+        assert!(right && !left, "held: a right-click, not a click");
+    }
+
+    fn app_events_owned(r: Vec<Routed>) -> Vec<Event> {
+        r.into_iter()
+            .filter_map(|r| match r {
+                Routed::App(e) => Some(e),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_mouse_right_button_presses_the_secondary_button() {
+        let mut g = Rig::new();
+        let p = CANVAS.center();
+        let out = g.send(vec![touch(200, TouchPhase::Start, p)]);
+        assert!(app_events(&out).iter().any(|e| matches!(e, Event::PointerButton { button: PointerButton::Secondary, pressed: true, .. })));
+        let out = g.send(vec![touch(200, TouchPhase::End, p)]);
+        assert!(app_events(&out).iter().any(|e| matches!(e, Event::PointerButton { button: PointerButton::Secondary, pressed: false, .. })));
+        // A pen without it is the primary button.
+        let out = g.send(vec![touch(100, TouchPhase::Start, p)]);
+        assert_eq!(presses(&out), [true]);
+        assert!(app_events(&out).iter().any(|e| matches!(e, Event::PointerButton { button: PointerButton::Primary, .. })));
+    }
+
+    #[test]
+    fn a_sideways_swipe_scrolls_a_strip_and_a_hold_still_grabs() {
+        let mut g = Rig::new();
+        let p = pos2(500.0, 25.0);
+        g.send(vec![touch(1, TouchPhase::Start, p)]);
+        assert!(presses(&g.wait(HOLD_TIME + 0.01)).is_empty(), "a strip waits as long as a list row");
+        let out = g.send(vec![touch(1, TouchPhase::Move, p + vec2(-60.0, 4.0))]);
+        assert!(presses(&out).is_empty(), "nothing pressed");
+        let dx: f32 = out.iter().filter_map(|r| if let Routed::StripScroll(d) = r { Some(*d) } else { None }).sum();
+        assert!(dx < -40.0 && wheel(&out) == Vec2::ZERO, "the strip itself, not the wheel: {dx} {out:?}");
+        g.send(vec![touch(1, TouchPhase::End, p + vec2(-60.0, 4.0))]);
+        // Held still first, a drag works the control under the finger.
+        g.wait(2.0);
+        g.send(vec![touch(2, TouchPhase::Start, p)]);
+        assert_eq!(presses(&g.wait(LONG_PRESS + 0.01)), [true]);
+        g.send(vec![touch(2, TouchPhase::End, p)]);
+        // A tap still clicks.
         g.wait(1.0);
         g.send(vec![touch(3, TouchPhase::Start, p)]);
         assert_eq!(presses(&g.send(vec![touch(3, TouchPhase::End, p)])), [true, false]);

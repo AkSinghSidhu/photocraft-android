@@ -35,7 +35,7 @@ pub static INTER_MEDIUM: LazyLock<Vec<u8>> = LazyLock::new(|| inflate_font(bundl
 pub static INTER_SEMIBOLD: LazyLock<Vec<u8>> = LazyLock::new(|| inflate_font(bundled_font!("Inter-SemiBold.ttf")));
 pub static JETBRAINS_MONO_REGULAR: LazyLock<Vec<u8>> = LazyLock::new(|| inflate_font(bundled_font!("JetBrainsMono-Regular.ttf")));
 
-/// Fonts shipped with Photocraft (OFL; licences in `assets/fonts`).
+/// Fonts shipped with PhotoCraft (OFL; licences in `assets/fonts`).
 pub static BUNDLED: [(&str, &LazyLock<Vec<u8>>); 4] = [
     ("Inter-Regular.ttf", &INTER_REGULAR),
     ("Inter-Medium.ttf", &INTER_MEDIUM),
@@ -761,14 +761,11 @@ mod fontconfig_tests {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 /// Folders the font scan reads besides the platform's ([`add_font_dir`]).
 static EXTRA_FONT_DIRS: std::sync::Mutex<Vec<std::path::PathBuf>> = std::sync::Mutex::new(Vec::new());
 
 /// Also scan `dir` for fonts (an app's own imported fonts, kept in its private storage). Call
 /// before the scan starts ([`crate::warm_shared`]); fonts added later are registered directly.
-/// Native targets only: there is no platform font dir on wasm (apps register fonts directly).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn add_font_dir(dir: std::path::PathBuf) {
     let mut dirs = EXTRA_FONT_DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     if !dirs.contains(&dir) {
@@ -776,10 +773,7 @@ pub fn add_font_dir(dir: std::path::PathBuf) {
     }
 }
 
-/// No directories to add on wasm (see [`add_font_dir`]): apps register their fonts without a scan.
-#[cfg(target_arch = "wasm32")]
-pub fn add_font_dir(_dir: std::path::PathBuf) {}
-
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
     use std::path::PathBuf;
     let home = std::env::var_os("HOME").map(PathBuf::from);
@@ -815,7 +809,6 @@ pub(crate) fn system_font_dirs() -> Vec<std::path::PathBuf> {
             v.push(h.join(".fonts"));
         }
     }
-    #[cfg(not(target_arch = "wasm32"))]
     v.extend(EXTRA_FONT_DIRS.lock().unwrap_or_else(std::sync::PoisonError::into_inner).iter().cloned());
     v
 }

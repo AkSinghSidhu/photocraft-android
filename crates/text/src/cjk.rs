@@ -389,6 +389,8 @@ pub fn font_files(script: CjkScript) -> Vec<FontFile> {
             TraditionalChinese => vec![w("msjh.ttc", "Microsoft JhengHei"), w("msjh.ttf", ""), w("mingliu.ttc", "")],
             Korean => vec![w("malgun.ttf", ""), w("gulim.ttc", "")],
         }
+    } else if cfg!(target_os = "android") {
+        android_font_files(script)
     } else {
         // One Noto Sans CJK collection covers all four scripts; the face picks the glyph forms.
         let noto = match script {
@@ -442,6 +444,57 @@ pub fn font_files(script: CjkScript) -> Vec<FontFile> {
     }
 }
 
+/// Android's own fonts: AOSP's Noto Sans CJK collection (or the per-script Noto files older
+/// releases ship), then whatever CJK fonts the device maker installed in the system font
+/// folders (found by name; each candidate's character map is checked before it's used).
+#[cfg(not(target_arch = "wasm32"))]
+fn android_font_files(script: CjkScript) -> Vec<FontFile> {
+    use CjkScript::*;
+    let (noto, tag) = match script {
+        Japanese => ("Noto Sans CJK JP", "jp"),
+        SimplifiedChinese => ("Noto Sans CJK SC", "sc"),
+        TraditionalChinese => ("Noto Sans CJK TC", "tc"),
+        Korean => ("Noto Sans CJK KR", "kr"),
+    };
+    let dirs = ["/system/fonts", "/product/fonts", "/system/product/fonts"];
+    let mut v: Vec<FontFile> = Vec::new();
+    for dir in dirs {
+        for name in ["NotoSansCJK-Regular.ttc", "NotoSansCJK-VF.otf.ttc", "NotoSansCJK-VF.ttc"] {
+            v.push(FontFile { path: std::path::Path::new(dir).join(name), family: noto.to_string() });
+        }
+        let per_script = match script {
+            Japanese => "NotoSansJP-Regular.otf",
+            SimplifiedChinese => "NotoSansSC-Regular.otf",
+            TraditionalChinese => "NotoSansTC-Regular.otf",
+            Korean => "NotoSansKR-Regular.otf",
+        };
+        v.push(FontFile { path: std::path::Path::new(dir).join(per_script), family: String::new() });
+    }
+    // Device makers' fonts (vivo, Xiaomi, OPPO, Samsung…): names mentioning CJK, the script or
+    // a Han/Hangul font, at most a few hundred directory entries per folder.
+    let hints: &[&str] = match script {
+        Japanese => &["cjk", "jp", "japan", "gothic"],
+        SimplifiedChinese => &["cjk", "sc", "hans", "chinese", "zh", "hei", "song", "hanyi", "hy"],
+        TraditionalChinese => &["cjk", "tc", "hant", "chinese", "zh", "hei", "ming"],
+        Korean => &["cjk", "kr", "korean", "gothic", "hangul"],
+    };
+    let mut found: Vec<std::path::PathBuf> = Vec::new();
+    for dir in dirs {
+        let Ok(rd) = std::fs::read_dir(dir) else { continue };
+        for e in rd.flatten().take(1024) {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            let font = name.ends_with(".ttf") || name.ends_with(".otf") || name.ends_with(".ttc") || name.ends_with(".otc");
+            let tagged = name.contains(tag) || hints.iter().any(|h| name.contains(h));
+            if font && tagged && !name.contains("emoji") && !v.iter().any(|f| f.path == e.path()) {
+                found.push(e.path());
+            }
+        }
+    }
+    found.sort();
+    v.extend(found.into_iter().map(|path| FontFile { path, family: String::new() }));
+    v
+}
+
 /// Flatpak mounts the host system font directory outside the runtime's `/usr/share/fonts`.
 /// Preserve the collection face and font preference order when trying that mirror.
 #[cfg(not(target_arch = "wasm32"))]
@@ -472,6 +525,8 @@ pub fn last_resort_files() -> Vec<FontFile> {
     } else if cfg!(target_os = "windows") {
         let dir = std::env::var("WINDIR").unwrap_or_else(|_| "C:\\Windows".into());
         vec![FontFile { path: std::path::Path::new(&dir).join("Fonts").join("ARIALUNI.TTF"), family: String::new() }]
+    } else if cfg!(target_os = "android") {
+        vec![f("/system/fonts/DroidSansFallbackFull.ttf"), f("/system/fonts/DroidSansFallback.ttf"), f("/system/fonts/NotoSansCJK-Regular.ttc")]
     } else {
         with_flatpak_host_fonts(vec![
             f("/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"),

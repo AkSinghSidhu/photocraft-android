@@ -30,21 +30,28 @@ fn register(bytes: Vec<u8>) -> Result<Vec<String>, String> {
     if families.is_empty() { Err("not a font file this app can read".into()) } else { Ok(families) }
 }
 
-/// A safe file name for an imported font: the picked name's last part, letters, digits and a
-/// few marks only, with its font extension.
-pub fn stored_name(picked: &Path) -> Option<String> {
-    let name = picked.file_name()?.to_string_lossy();
-    let ext = Path::new(name.as_ref()).extension()?.to_string_lossy().to_lowercase();
-    if !EXTENSIONS.contains(&ext.as_str()) {
-        return None;
+/// The font extension `bytes` call for, from the file's signature: some document providers
+/// hand a font over without its extension (or under a generic name).
+pub fn sniffed_extension(bytes: &[u8]) -> Option<&'static str> {
+    match bytes.get(..4)? {
+        [0, 1, 0, 0] | b"true" => Some("ttf"),
+        b"OTTO" => Some("otf"),
+        b"ttcf" => Some("ttc"),
+        _ => None,
     }
-    let stem: String = Path::new(name.as_ref())
-        .file_stem()?
-        .to_string_lossy()
-        .chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ' | '.') { c } else { '_' })
-        .take(100)
-        .collect();
+}
+
+/// A safe file name for an imported font: the picked name's last part, letters, digits and a
+/// few marks only, with its font extension (`sniffed`, from the contents, when the name has
+/// none of the font extensions).
+pub fn stored_name(picked: &Path, sniffed: Option<&str>) -> Option<String> {
+    let name = picked.file_name()?.to_string_lossy();
+    let named = Path::new(name.as_ref()).extension().map(|e| e.to_string_lossy().to_lowercase()).filter(|e| EXTENSIONS.contains(&e.as_str()));
+    let (ext, stem) = match named {
+        Some(ext) => (ext, Path::new(name.as_ref()).file_stem()?.to_string_lossy().into_owned()),
+        None => (sniffed?.to_string(), name.to_string()),
+    };
+    let stem: String = stem.chars().map(|c| if c.is_alphanumeric() || matches!(c, '-' | '_' | ' ' | '.') { c } else { '_' }).take(100).collect();
     let stem = stem.trim();
     (!stem.is_empty()).then(|| format!("{stem}.{ext}"))
 }
@@ -52,12 +59,12 @@ pub fn stored_name(picked: &Path) -> Option<String> {
 /// Import one picked file into `dir`: returns the families it added.
 pub fn import_file(picked: &Path, dir: &Path) -> Result<Vec<String>, String> {
     let shown = picked.file_name().map_or_else(|| picked.display().to_string(), |n| n.to_string_lossy().into_owned());
-    let name = stored_name(picked).ok_or_else(|| format!("{shown}: not a .ttf, .otf, .ttc or .otc file"))?;
     let size = std::fs::metadata(picked).map_err(|e| format!("{shown}: {e}"))?.len();
     if size > MAX_FONT_BYTES {
         return Err(format!("{shown}: too large for a font"));
     }
     let bytes = std::fs::read(picked).map_err(|e| format!("{shown}: {e}"))?;
+    let name = stored_name(picked, sniffed_extension(&bytes)).ok_or_else(|| format!("{shown}: not a .ttf, .otf, .ttc or .otc font"))?;
     let families = register(bytes.clone()).map_err(|e| format!("{shown}: {e}"))?;
     std::fs::create_dir_all(dir).map_err(|e| format!("{shown}: {e}"))?;
     photocraft_format::atomic_write(&dir.join(name), &bytes).map_err(|e| format!("{shown}: {e}"))?;
@@ -99,7 +106,17 @@ pub fn menu(files_dir: &Path, bridge: Arc<Bridge>, outcome: Outcome, wake: impl 
             let (dir, outcome, wake) = (dir.clone(), outcome.clone(), wake.clone());
             let request = FileDialogRequest::Open { multiple: true, initial_dir: None, extensions: Some(EXTENSIONS.iter().map(|e| e.to_string()).collect()) };
             crate::services::ask(&bridge, request, move |answer| {
-                let Some(FileDialogAnswer::Paths(paths)) = answer else { return };
+                let paths = match answer {
+                    Some(FileDialogAnswer::Paths(paths)) => paths,
+                    Some(FileDialogAnswer::Unavailable(e)) => {
+                        *outcome.lock().unwrap_or_else(PoisonError::into_inner) = Some((format!("Couldn't open the file picker: {e}"), true));
+                        wake();
+                        return;
+                    }
+                    // Cancelled: nothing to say.
+                    _ => return,
+                };
+                log::info!("importing {} font file(s)", paths.len());
                 let results: Vec<_> = paths.iter().map(|p| import_file(Path::new(p), &dir)).collect();
                 *outcome.lock().unwrap_or_else(PoisonError::into_inner) = Some(summary(&results));
                 wake();
@@ -115,10 +132,13 @@ mod tests {
 
     #[test]
     fn stored_names_are_safe_font_files() {
-        assert_eq!(stored_name(Path::new("/x/inbox/3/Comic Neue Bold.TTF")).as_deref(), Some("Comic Neue Bold.ttf"));
-        assert_eq!(stored_name(Path::new("/x/../../evil/a?b*.otf")).as_deref(), Some("a_b_.otf"));
-        assert_eq!(stored_name(Path::new("/x/notes.txt")), None);
-        assert_eq!(stored_name(Path::new("/x/.ttf")), None);
+        assert_eq!(stored_name(Path::new("/x/inbox/3/Comic Neue Bold.TTF"), None).as_deref(), Some("Comic Neue Bold.ttf"));
+        assert_eq!(stored_name(Path::new("/x/../../evil/a?b*.otf"), None).as_deref(), Some("a_b_.otf"));
+        assert_eq!(stored_name(Path::new("/x/notes.txt"), None), None);
+        assert_eq!(stored_name(Path::new("/x/.ttf"), None), None);
+        // A provider that drops the extension: the contents name it.
+        assert_eq!(stored_name(Path::new("/x/inbox/4/Comic Neue"), Some("ttf")).as_deref(), Some("Comic Neue.ttf"));
+        assert_eq!(stored_name(Path::new("/x/inbox/4/document"), None), None);
     }
 
     #[test]
@@ -138,6 +158,13 @@ mod tests {
         assert!(import_file(&fake, &out).unwrap_err().contains("not a font"));
         assert!(!out.join("Fake.ttf").exists());
         assert!(import_file(&src.join("notes.txt"), &out).is_err());
+        // No extension at all: still a font by its contents.
+        let bare = src.join("Inter Bare");
+        std::fs::write(&bare, &*photocraft_text::fonts::INTER_REGULAR).unwrap();
+        assert!(import_file(&bare, &out).is_ok());
+        assert!(out.join("Inter Bare.ttf").exists());
+        assert_eq!(sniffed_extension(b"OTTO...."), Some("otf"));
+        assert_eq!(sniffed_extension(b"PK"), None);
         let (msg, err) = summary(&[Ok(families), Err("Fake.ttf: not a font".into())]);
         assert!(msg.starts_with("Font added: Inter") && msg.contains("skipped") && err, "{msg}");
         std::fs::remove_dir_all(dir).ok();

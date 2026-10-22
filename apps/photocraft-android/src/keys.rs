@@ -15,6 +15,8 @@ pub struct Held {
     ctrl: [bool; 2],
     alt: [bool; 2],
     shift: [bool; 2],
+    /// What egui was last told is held.
+    sent: Modifiers,
 }
 
 impl Held {
@@ -39,14 +41,24 @@ impl Held {
         true
     }
 
+    /// A `ModifiersChanged` if egui's idea of what is held is out of date. Never one per frame:
+    /// any event in a frame's input makes egui repaint at once, which would keep an idle app
+    /// drawing at the display's refresh rate.
+    fn sync(&mut self, out: &mut Vec<Event>) {
+        let now = self.modifiers();
+        if now != self.sent {
+            self.sent = now;
+            out.push(Event::ModifiersChanged(now));
+        }
+    }
+
     /// Put the modifiers on a frame's input, in order: a `ModifiersChanged` (egui's held state)
-    /// at the start and after each modifier key, and on every key and pointer event (egui
-    /// matches shortcuts against the event's own modifiers). While Ctrl or Alt is held a key
+    /// after each modifier key, and on every key and pointer event (egui matches shortcuts
+    /// against the event's own modifiers). While Ctrl or Alt is held a key
     /// types no text (winit still reports "s" for Ctrl+S, which would land in a focused field).
     pub fn apply(&mut self, input: &mut egui::RawInput) {
         let events = std::mem::take(&mut input.events);
         let mut out = Vec::with_capacity(events.len() + 2);
-        out.push(Event::ModifiersChanged(self.modifiers()));
         for mut e in events {
             let m = self.modifiers();
             match &mut e {
@@ -55,14 +67,19 @@ impl Held {
                     *modifiers = if changed { self.modifiers() } else { m };
                     out.push(e);
                     if changed {
-                        out.push(Event::ModifiersChanged(self.modifiers()));
+                        self.sync(&mut out);
                     }
                     continue;
                 }
                 Event::Text(_) if m.ctrl || m.alt => continue,
                 Event::PointerButton { modifiers, .. } | Event::MouseWheel { modifiers, .. } => *modifiers = m,
                 // Keys released while another app had focus never report their release here.
-                Event::WindowFocused(false) => *self = Self::default(),
+                Event::WindowFocused(false) => {
+                    *self = Self { sent: self.sent, ..Self::default() };
+                    out.push(e);
+                    self.sync(&mut out);
+                    continue;
+                }
                 _ => {}
             }
             out.push(e);
@@ -108,7 +125,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(states, vec![Modifiers::NONE, CTRL, Modifiers::NONE]);
+        assert_eq!(states, vec![CTRL, Modifiers::NONE]);
         assert_eq!(held.modifiers(), Modifiers::NONE);
     }
 
@@ -117,9 +134,7 @@ mod tests {
         let mut held = Held::default();
         run(&mut held, vec![key(Key::ShiftLeft, true), key(Key::ControlRight, true)]);
         let out = run(&mut held, vec![key(Key::S, true)]);
-        assert!(
-            matches!(out.as_slice(), [Event::ModifiersChanged(m), Event::Key { modifiers, .. }] if *m == *modifiers && modifiers.command && modifiers.shift)
-        );
+        assert!(matches!(out.as_slice(), [Event::Key { modifiers, .. }] if modifiers.command && modifiers.shift), "{out:?}");
         // Releasing one Shift of two keeps Shift held.
         run(&mut held, vec![key(Key::ShiftRight, true), key(Key::ShiftLeft, false)]);
         assert!(held.modifiers().shift);
@@ -143,7 +158,17 @@ mod tests {
     #[test]
     fn losing_focus_releases_everything() {
         let mut held = Held::default();
-        run(&mut held, vec![key(Key::ControlLeft, true), Event::WindowFocused(false)]);
+        let out = run(&mut held, vec![key(Key::ControlLeft, true), Event::WindowFocused(false)]);
         assert_eq!(held.modifiers(), Modifiers::NONE);
+        assert!(matches!(out.last(), Some(Event::ModifiersChanged(m)) if *m == Modifiers::NONE), "egui hears that Ctrl is up: {out:?}");
+    }
+
+    /// An idle app has nothing to say: any event would make egui repaint, frame after frame.
+    #[test]
+    fn a_frame_without_changes_has_no_events() {
+        let mut held = Held::default();
+        assert!(run(&mut held, vec![]).is_empty());
+        run(&mut held, vec![key(Key::ShiftLeft, true)]);
+        assert!(run(&mut held, vec![]).is_empty(), "a held modifier is not news");
     }
 }

@@ -8,8 +8,9 @@
 //! Per frame of a stroke it records the interval since the previous frame started, the pointer
 //! moves the frame delivered, the live stroke's render time, the canvas refresh (composite and
 //! upload), the UI build, and eframe's CPU time for the frame before (UI, tessellation and GPU
-//! submission, without the vsync wait). What the app can't see (the OS input queue before a frame
-//! starts, frames queued for the display, the compositor) is the rest of the input-to-photon time;
+//! submission, without the vsync wait). Where the platform timestamps pen samples (Android), also
+//! how old the newest sample is when the frame starts. What the app can't see (frames queued for
+//! the display, the compositor) is the rest of the input-to-photon time;
 //! the summary names the GPU backend because GL ignores the frame-latency setting.
 
 use std::fmt::Write as _;
@@ -31,6 +32,9 @@ pub(crate) struct Row {
     pub ui: f64,
     /// eframe's CPU time for the previous frame: UI, tessellation and GPU submission.
     pub cpu_prev: Option<f64>,
+    /// How old the newest pen sample was when the frame started (the OS input queue and
+    /// batching); `None` without a new sample or a platform that timestamps them.
+    pub input_age: Option<f64>,
 }
 
 /// Percentiles of a stroke's frames, for the summary line and the control channel.
@@ -50,6 +54,8 @@ pub struct Summary {
     pub cpu: [f64; 2],
     /// Frame interval minus that CPU time: waiting on vsync / the swap chain, or idle.
     pub wait: [f64; 2],
+    /// Age of the newest pen sample at the start of a frame, where the platform reports it.
+    pub input: [f64; 2],
 }
 
 impl Summary {
@@ -65,6 +71,7 @@ impl Summary {
             f("ui", self.ui),
             f("cpu", self.cpu),
             f("wait", self.wait),
+            f("input", self.input),
         ]
         .join(" ")
     }
@@ -160,6 +167,13 @@ impl StrokeTrace {
         }
     }
 
+    /// How old the newest pen sample is at this frame's start, in ms.
+    pub fn input_age(&mut self, ms: f64) {
+        if let Some(f) = self.frame.as_mut() {
+            f.input_age = Some(ms);
+        }
+    }
+
     /// Time spent rendering stroke points this frame.
     pub fn stroke(&mut self, ms: f64) {
         if let Some(f) = self.frame.as_mut() {
@@ -206,6 +220,7 @@ impl StrokeTrace {
             // A frame's cpu_prev belongs to the frame before it, so pair it with that interval.
             cpu: percentiles(rows.iter().skip(1).filter_map(|r| r.cpu_prev).collect()),
             wait: percentiles(rows.windows(2).filter_map(|w| Some((w[1].interval - w[1].cpu_prev?).max(0.0))).collect()),
+            input: col(|r| r.input_age),
         };
         if self.enabled() {
             eprintln!("{}", summary.line());
@@ -226,11 +241,22 @@ impl StrokeTrace {
 pub(crate) fn csv(stroke: usize, rows: &[Row], header: bool) -> String {
     let mut s = String::new();
     if header {
-        s.push_str("stroke,t_ms,interval_ms,moves,stroke_ms,canvas_ms,ui_ms,cpu_prev_ms\n");
+        s.push_str("stroke,t_ms,interval_ms,moves,stroke_ms,canvas_ms,ui_ms,cpu_prev_ms,input_age_ms\n");
     }
     for r in rows {
-        let cpu = r.cpu_prev.map_or(String::new(), |c| format!("{c:.3}"));
-        let _ = writeln!(s, "{stroke},{:.3},{:.3},{},{:.3},{:.3},{:.3},{cpu}", r.t, r.interval, r.moves, r.stroke, r.canvas, r.ui);
+        let opt = |v: Option<f64>| v.map_or(String::new(), |v| format!("{v:.3}"));
+        let _ = writeln!(
+            s,
+            "{stroke},{:.3},{:.3},{},{:.3},{:.3},{:.3},{},{}",
+            r.t,
+            r.interval,
+            r.moves,
+            r.stroke,
+            r.canvas,
+            r.ui,
+            opt(r.cpu_prev),
+            opt(r.input_age)
+        );
     }
     s
 }
@@ -255,6 +281,7 @@ mod tests {
         t.begin_frame(now, 3);
         t.cpu_prev(Some(cpu / 1000.0));
         if stroking {
+            t.input_age(7.0);
             t.stroke(1.0);
             t.canvas(2.0);
         }
@@ -275,7 +302,7 @@ mod tests {
         assert_eq!(s.frames, 11);
         assert_eq!(s.interval, [16.0, 16.0], "the idle gap before the stroke isn't a frame interval");
         assert_eq!((s.stroke, s.canvas, s.ui, s.moves), ([1.0, 1.0], [2.0, 2.0], [4.0, 4.0], [3.0, 3.0]));
-        assert_eq!((s.cpu, s.wait), ([6.0, 6.0], [10.0, 10.0]));
+        assert_eq!((s.cpu, s.wait, s.input), ([6.0, 6.0], [10.0, 10.0], [7.0, 7.0]));
         assert!(s.line().contains("11 frames on vulkan Test GPU") && s.line().contains("wait 10.00/10.00"), "{}", s.line());
         // Off: nothing is kept.
         let mut off = StrokeTrace::default();
@@ -299,8 +326,11 @@ mod tests {
 
     #[test]
     fn csv_rows_and_odd_numbers() {
-        let rows = [Row { t: 1.0, interval: 16.5, moves: 2, stroke: 0.25, canvas: 1.0, ui: 3.0, cpu_prev: None }];
-        assert_eq!(csv(1, &rows, true), "stroke,t_ms,interval_ms,moves,stroke_ms,canvas_ms,ui_ms,cpu_prev_ms\n1,1.000,16.500,2,0.250,1.000,3.000,\n");
+        let rows = [Row { t: 1.0, interval: 16.5, moves: 2, stroke: 0.25, canvas: 1.0, ui: 3.0, cpu_prev: None, input_age: Some(5.5) }];
+        assert_eq!(
+            csv(1, &rows, true),
+            "stroke,t_ms,interval_ms,moves,stroke_ms,canvas_ms,ui_ms,cpu_prev_ms,input_age_ms\n1,1.000,16.500,2,0.250,1.000,3.000,,5.500\n"
+        );
         assert_eq!(percentiles(vec![]), [0.0, 0.0]);
         assert_eq!(percentiles(vec![f64::NAN, 2.0, f64::INFINITY]), [2.0, 2.0]);
         assert_eq!(percentiles((1..=100).map(f64::from).collect()), [51.0, 95.0]);

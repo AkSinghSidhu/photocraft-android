@@ -10,12 +10,15 @@ import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.os.Trace;
 import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.webkit.MimeTypeMap;
 import android.widget.Toast;
 
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
@@ -65,11 +68,15 @@ public class PhotoCraftActivity extends GameActivity {
     }
 
     /** One pointer of a MotionEvent (photocraft-tablet's android.rs). */
-    private static native void nativePen(int action, int tool, int buttons, float pressure, float tilt, float orientation);
+    private static native void nativePen(int action, int tool, int buttons, float pressure, float tilt, float orientation, float x, float y, int ageMs);
 
-    /** A pointer went down: its id and tool type, so Rust tells fingers from pens (touch gestures,
+    /** A pointer went down: its id, tool type and buttons, so Rust tells fingers from pens and a
+     * right-click from a click (touch gestures,
      * palm rejection; photocraft-tablet's android.rs). */
-    private static native void nativePointer(int id, int tool);
+    private static native void nativePointer(int id, int tool, int buttons);
+
+    /** The on-screen keyboard's height in pixels (0: hidden), for photocraft-tablet's android.rs. */
+    private static native void nativeImeHeight(int px);
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService io = Executors.newSingleThreadExecutor();
@@ -88,6 +95,7 @@ public class PhotoCraftActivity extends GameActivity {
                 checkSync();
                 checkQuit();
                 checkUpdateRequest();
+                checkClipboard();
             } catch (Exception e) {
                 Log.e(TAG, "bridge", e);
             }
@@ -110,7 +118,24 @@ public class PhotoCraftActivity extends GameActivity {
         }
         hideSystemBars();
         handleSentDocument(getIntent());
+        // The on-screen keyboard's height, so the app lays out above it instead of under it.
+        android.view.View decor = getWindow().getDecorView();
+        decor.getViewTreeObserver().addOnGlobalLayoutListener(() -> {
+            WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(decor);
+            int ime = insets == null ? 0 : insets.getInsets(WindowInsetsCompat.Type.ime()).bottom;
+            if (ime != lastImeHeight) {
+                lastImeHeight = ime;
+                try {
+                    nativeImeHeight(ime);
+                } catch (UnsatisfiedLinkError err) {
+                    // The library isn't loaded yet: the next layout tells it.
+                    lastImeHeight = -1;
+                }
+            }
+        });
     }
+
+    private int lastImeHeight = -1;
 
     @Override
     protected void onResume() {
@@ -197,11 +222,25 @@ public class PhotoCraftActivity extends GameActivity {
 
     @Override
     public boolean dispatchTouchEvent(MotionEvent e) {
+        // Some Samsung devices report an S Pen touching with its side button held as their own
+        // actions (211 down, 212 up, 213 move, 214 cancel), which nothing downstream knows: the
+        // pen then did nothing at all while the button was held. Turn them into Android's own
+        // and remember the button, for the pen buttons' settings.
+        int samsung = e.getActionMasked() - SAMSUNG_PEN_DOWN;
+        sideButtonHeld = samsung >= 0 && samsung <= 3;
+        if (sideButtonHeld) {
+            int[] standard = {MotionEvent.ACTION_DOWN, MotionEvent.ACTION_UP, MotionEvent.ACTION_MOVE, MotionEvent.ACTION_CANCEL};
+            e.setAction(standard[samsung] | (e.getAction() & MotionEvent.ACTION_POINTER_INDEX_MASK));
+        }
         int action = e.getActionMasked();
         if (action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN) {
             int i = e.getActionIndex();
+            if (isPen(e.getToolType(i))) {
+                // Pen samples as the digitizer reports them, not batched to the next frame.
+                getWindow().getDecorView().requestUnbufferedDispatch(e);
+            }
             try {
-                nativePointer(e.getPointerId(i), e.getToolType(i));
+                nativePointer(e.getPointerId(i), e.getToolType(i), buttonsOf(e));
             } catch (UnsatisfiedLinkError err) {
                 // The library isn't loaded: every pointer counts as a finger.
             }
@@ -212,8 +251,19 @@ public class PhotoCraftActivity extends GameActivity {
 
     @Override
     public boolean dispatchGenericMotionEvent(MotionEvent e) {
+        sideButtonHeld = false;
         forwardPen(e);
         return super.dispatchGenericMotionEvent(e);
+    }
+
+    /** Samsung's first S Pen action with the side button held (see dispatchTouchEvent). */
+    private static final int SAMSUNG_PEN_DOWN = 211;
+    /** The event being dispatched came as one of Samsung's side-button actions. */
+    private boolean sideButtonHeld;
+
+    /** The event's buttons, with the side button when Samsung reported it as its own action. */
+    private int buttonsOf(MotionEvent e) {
+        return e.getButtonState() | (sideButtonHeld ? MotionEvent.BUTTON_STYLUS_PRIMARY : 0);
     }
 
     private static boolean isPen(int tool) {
@@ -235,12 +285,20 @@ public class PhotoCraftActivity extends GameActivity {
         return 0;
     }
 
+    /** Milliseconds since an event happened (both on the uptime clock), for the latency trace. */
+    private static int age(long now, long eventTime) {
+        return (int) Math.max(0, Math.min(now - eventTime, 10_000));
+    }
+
     private void forwardPen(MotionEvent e) {
+        // A marker for Perfetto traces (free when no trace is running): lines pen delivery up with frames.
+        Trace.beginSection("photocraft:pen");
         try {
             int action = e.getActionMasked();
             int p = penPointer(e);
             int tool = e.getToolType(p);
-            int buttons = e.getButtonState();
+            int buttons = buttonsOf(e);
+            long now = SystemClock.uptimeMillis();
             if (action == MotionEvent.ACTION_POINTER_DOWN || action == MotionEvent.ACTION_POINTER_UP) {
                 // Another finger coming or going says nothing about the pen.
                 if (!isPen(tool)) {
@@ -251,14 +309,18 @@ public class PhotoCraftActivity extends GameActivity {
                 // Samples the digitizer reported between two frames, oldest first.
                 for (int h = 0; h < e.getHistorySize(); h++) {
                     nativePen(action, tool, buttons, e.getHistoricalPressure(p, h),
-                            e.getHistoricalAxisValue(MotionEvent.AXIS_TILT, p, h), e.getHistoricalOrientation(p, h));
+                            e.getHistoricalAxisValue(MotionEvent.AXIS_TILT, p, h), e.getHistoricalOrientation(p, h),
+                            e.getHistoricalX(p, h), e.getHistoricalY(p, h), age(now, e.getHistoricalEventTime(h)));
                 }
             }
-            nativePen(action, tool, buttons, e.getPressure(p), e.getAxisValue(MotionEvent.AXIS_TILT, p), e.getOrientation(p));
+            nativePen(action, tool, buttons, e.getPressure(p), e.getAxisValue(MotionEvent.AXIS_TILT, p), e.getOrientation(p),
+                    e.getX(p), e.getY(p), age(now, e.getEventTime()));
         } catch (UnsatisfiedLinkError err) {
             // The library isn't loaded (it failed to load): the pen paints like a finger.
         } catch (RuntimeException err) {
             Log.w(TAG, "pen", err);
+        } finally {
+            Trace.endSection();
         }
     }
 
@@ -416,6 +478,43 @@ public class PhotoCraftActivity extends GameActivity {
         f.delete();
         checkSync();
         finish();
+    }
+
+    /**
+     * The system clipboard for text fields: `clip-set.txt` (written by the app) is copied to it,
+     * and `clip-get` asks for its text, answered in `clip.txt`. Read only when the app asks (a
+     * paste), and the files are removed as soon as they're read.
+     */
+    private void checkClipboard() throws IOException {
+        android.content.ClipboardManager cm = (android.content.ClipboardManager) getSystemService(CLIPBOARD_SERVICE);
+        if (cm == null) {
+            return;
+        }
+        File set = new File(bridge, "clip-set.txt");
+        if (set.isFile()) {
+            String text = readText(set);
+            //noinspection ResultOfMethodCallIgnored
+            set.delete();
+            cm.setPrimaryClip(ClipData.newPlainText("PhotoCraft", text));
+        }
+        File get = new File(bridge, "clip-get");
+        if (get.exists() && get.delete()) {
+            String text = "";
+            ClipData clip = cm.getPrimaryClip();
+            if (clip != null && clip.getItemCount() > 0) {
+                CharSequence t = clip.getItemAt(0).coerceToText(this);
+                if (t != null) {
+                    text = t.toString();
+                }
+            }
+            File tmp = new File(bridge, "clip.txt.tmp");
+            try (OutputStream out = new FileOutputStream(tmp)) {
+                out.write(text.getBytes(StandardCharsets.UTF_8));
+            }
+            if (!tmp.renameTo(new File(bridge, "clip.txt"))) {
+                Log.w(TAG, "clipboard: rename failed");
+            }
+        }
     }
 
     /** Help › Check for Updates… (bridge `check-update`). */

@@ -19,19 +19,36 @@ pub enum Side {
     Right,
 }
 
-/// One key: the text it shows and the shortcut it presses (`"Ctrl+Z"`, `"B"`, or a modifier on
-/// its own, `"Alt"`, held for as long as the key is touched). An empty shortcut does nothing.
+/// One key: the text it shows, the shortcut it presses (`"Ctrl+Z"`, `"B"`, or a modifier on
+/// its own, `"Alt"`, held for as long as the key is touched) and its colour. An empty shortcut
+/// does nothing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct KeySlot {
     pub label: String,
     pub shortcut: String,
+    /// The key's colour (sRGB), so keys can be told apart by what they do; `None`: the theme's.
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
 }
 
 impl KeySlot {
     fn new(label: &str, shortcut: &str) -> Self {
-        Self { label: label.into(), shortcut: shortcut.into() }
+        Self { label: label.into(), shortcut: shortcut.into(), color: None }
     }
 }
+
+/// The key colours offered in the settings (any other can be picked too).
+pub const KEY_COLORS: &[(&str, [u8; 3])] = &[
+    ("Red", [192, 57, 43]),
+    ("Orange", [211, 108, 20]),
+    ("Yellow", [212, 172, 13]),
+    ("Green", [39, 154, 86]),
+    ("Teal", [22, 140, 125]),
+    ("Blue", [41, 112, 185]),
+    ("Purple", [132, 68, 173]),
+    ("Pink", [204, 69, 138]),
+    ("Gray", [105, 110, 118]),
+];
 
 /// What turning the wheel does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
