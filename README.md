@@ -1,15 +1,19 @@
 # PhotoCraft for Android
 ### A desktop-class image editor, rebuilt for Android tablets.
 
-[![Download APK](https://img.shields.io/badge/Download-APK%200.9.0--4-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/morte2437/photocraft-android/releases/download/android-v0.9.0-4/photocraft-0.9.0-4-arm64-v8a.apk)
+[![Download APK](https://img.shields.io/badge/Download-APK%200.11.1--1-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://github.com/AkSinghSidhu/photocraft-android/releases/download/android-v0.11.1-1/photocraft-0.11.1-1-arm64-v8a.apk)
 ![Android 8+](https://img.shields.io/badge/Android-8.0%2B-555?style=for-the-badge)
 ![Free & open source](https://img.shields.io/badge/Free-Open%20source-555?style=for-the-badge)
 
-<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22ai.storyteller.photocraft%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2Fmorte2437%2Fphotocraft-android%22%2C%22author%22%3A%22morte2437%22%2C%22name%22%3A%22PhotoCraft%20for%20Android%22%2C%22additionalSettings%22%3A%22%7B%5C%22includePrereleases%5C%22%3A%20true%7D%22%7D"><img src="docs/images/badge-obtainium.png" alt="Get it on Obtainium" height="56"></a>
+<a href="https://apps.obtainium.imranr.dev/redirect?r=obtainium://app/%7B%22id%22%3A%22ai.storyteller.photocraft%22%2C%22url%22%3A%22https%3A%2F%2Fgithub.com%2FAkSinghSidhu%2Fphotocraft-android%22%2C%22author%22%3A%22AkSinghSidhu%22%2C%22name%22%3A%22PhotoCraft%20for%20Android%22%2C%22additionalSettings%22%3A%22%7B%5C%22includePrereleases%5C%22%3A%20true%7D%22%7D"><img src="docs/images/badge-obtainium.png" alt="Get it on Obtainium" height="56"></a>
 
-<sub>[All releases and release notes](https://github.com/morte2437/photocraft-android/releases) · arm64 tablets · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
+<sub>[All releases and release notes](https://github.com/AkSinghSidhu/photocraft-android/releases) · arm64 tablets and phones · a prototype, signed with a debug key for sideloading · Obtainium installs and updates it straight from these releases</sub>
 
 <img src="docs/images/android-touch-gestures.gif" width="720" alt="Pinching, twisting and panning The Great Wave off Kanagawa with two fingers, then zooming and rotating with the Shortcut Pad wheel">
+
+| 📱 **Phone layout** | 📷 **Simple Mode on any screen** | 🎨 **All three UI surfaces** |
+|---|---|---|
+| On narrow windows the panels fold into phone-friendly sheets, so Studio Mode works without a tablet-width screen. Simple Mode's corner buttons and pills compact the same way. | Two UIs in one app, switchable from the View menu or the toolbar: the desktop-like Studio layout, and a touch-first shell — floating menu, tool rail with colour picks, size and opacity pills at the bottom, layers palette on the edge. They live on every screen the app runs on, tablet or phone. | Same document, same tools: switch UI while editing and the canvas keeps its place — nothing is reloaded, nothing is lost. |
 
 | 🎛️ **Shortcut Pad** | ✒️ **Real pen support** | ⌨️ **Keyboards that work** |
 |---|---|---|
@@ -34,7 +38,7 @@ What the port adds:
 - **Shortcut Pad:** 2 to 10 touch keys and a wheel on the screen edge, like a pen tablet's
   ExpressKeys, for working without a keyboard (Window › Shortcut Pad).
 
-Found a bug? [Report it here](https://github.com/morte2437/photocraft-android/issues/new/choose).
+Found a bug? [Report it here](https://github.com/AkSinghSidhu/photocraft-android/issues/new/choose).
 
 ## Simple Mode (in work, `simple-ui` branch)
 
