@@ -65,7 +65,9 @@ jobs:
           ANDROID_HOME: /usr/local/lib/android/sdk
         run: |
           # The same NDK/build versions the local build pins (r28.2, platform 35): sdkmanager
-          # skips what the runner already has, and installs what it is missing.
+          # skips what the runner already has, and installs what it is missing. Recent Ubuntu
+          # runner images stopped putting sdkmanager on PATH — point at the tool's real home.
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$PATH"
           sdkmanager --install "ndk;28.2.13676358" "platforms;android-35" "build-tools;35.0.0" > /dev/null
           export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/28.2.13676358"
 
