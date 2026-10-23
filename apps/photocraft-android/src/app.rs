@@ -293,6 +293,10 @@ impl eframe::App for Shell {
     }
 
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        // One tap, one press: feeding the same contact twice (twins) would re-toggle what the
+        // first press just opened. No-op on shells that report one event family (upstream wires
+        // this for the web shell; harmless everywhere).
+        photocraft_ui_egui::touch_twins::drop_twins(ctx, raw_input);
         // The on-screen keyboard takes the bottom of the window: the app lays out in what's left
         // above it (panels, menus and dialogs alike), as apps that resize for the keyboard do.
         let ime = photocraft_tablet::android::ime_height_px() / ctx.pixels_per_point();
