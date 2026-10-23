@@ -158,3 +158,12 @@ If the field has a PSD equivalent, map it in `crates/io` too, and keep unknown P
   GitHub profiles). Never hand-edit `contributors.json`.
 - Maintainers refresh the stats with `python3 ../../craftrules/scripts/contributors.py .` (it also
   re-verifies who wrote each `people.toml` entry; `--check` only verifies).
+
+## Fork releases (standing rule)
+
+Every release or pre-release on this fork -- even a one-line fix -- must ship with a
+categorized changelog before it counts as done: sections like Added / Fixed /
+Performance / Hardening, each item user-facing, public-safe wording, no internal
+shorthand. Flow: push code -> tag -> CI builds the APK and creates the release ->
+immediately `gh release edit <tag> -R AkSinghSidhu/photocraft-android --notes-file`
+with that changelog. Never leave CI's default body as the final state.
